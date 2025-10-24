@@ -1,26 +1,57 @@
 import sqlite3
 import logging
+import os
 
 # --- Configuração ---
-DB_FILE = "database.db"
+DATABASE_FILE = "database.db"
 log = logging.getLogger(__name__)
 
+# --- Conexão Singleton (para garantir uma única conexão) ---
+_connection = None
+
+
+def get_db_connection():
+    """Retorna a conexão singleton com o banco de dados."""
+    global _connection
+    if _connection is None:
+        try:
+            # Usamos o isolation_level padrão (DEFERRED) para que as
+            # transações sejam gerenciadas manualmente (com COMMIT/ROLLBACK).
+            _connection = sqlite3.connect(DATABASE_FILE)
+            # Ativa o suporte a Foreign Keys (desativado por padrão no SQLite)
+            _connection.execute("PRAGMA foreign_keys = ON;")
+            log.info(f"Conexão com o banco de dados '{DATABASE_FILE}' estabelecida.")
+        except sqlite3.Error as e:
+            log.critical(f"Falha ao conectar ao banco de dados: {e}", exc_info=True)
+            raise
+    return _connection
+
+
+def close_db_connection():
+    """Fecha a conexão com o banco de dados, se estiver aberta."""
+    global _connection
+    if _connection:
+        _connection.close()
+        _connection = None
+        log.info("Conexão com o banco de dados fechada.")
+
+
+# --- Inicialização ---
 
 def init_db():
     """
-    Inicializa o banco de dados.
-    Cria as tabelas se elas não existirem.
+    Cria as tabelas do banco de dados se elas não existirem.
     """
     log.info("Verificando e inicializando o banco de dados...")
 
-    # Comandos SQL para criar as tabelas
-    # (Usando 'IF NOT EXISTS' para segurança)
+    # Comandos SQL para criar tabelas (schema)
+    # Usamos 'IF NOT EXISTS' para segurança
 
     create_clientes_table = """
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        email TEXT,
+        nome TEXT NOT NULL CHECK(length(nome) > 0),
+        email TEXT UNIQUE,
         telefone TEXT
     );
     """
@@ -33,7 +64,6 @@ def init_db():
         total REAL NOT NULL,
         FOREIGN KEY (cliente_id) REFERENCES clientes (id)
             ON DELETE RESTRICT -- Impede excluir cliente com pedido
-            ON UPDATE CASCADE
     );
     """
 
@@ -41,122 +71,126 @@ def init_db():
     CREATE TABLE IF NOT EXISTS itens_pedido (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pedido_id INTEGER NOT NULL,
-        produto TEXT NOT NULL,
-        quantidade INTEGER NOT NULL,
-        preco_unit REAL NOT NULL,
+        produto TEXT NOT NULL CHECK(length(produto) > 0),
+        quantidade INTEGER NOT NULL CHECK(quantidade > 0),
+        preco_unit REAL NOT NULL CHECK(preco_unit >= 0),
         FOREIGN KEY (pedido_id) REFERENCES pedidos (id)
             ON DELETE CASCADE -- Exclui itens se o pedido for excluído
-            ON UPDATE CASCADE
     );
     """
 
-    # (Opcional) Índices para otimizar buscas
-    create_idx_cliente_nome = "CREATE INDEX IF NOT EXISTS idx_cliente_nome ON clientes(nome);"
-    create_idx_pedido_cliente = "CREATE INDEX IF NOT EXISTS idx_pedido_cliente ON pedidos(cliente_id);"
-    create_idx_item_pedido = "CREATE INDEX IF NOT EXISTS idx_item_pedido ON itens_pedido(pedido_id);"
-
-    conn = None
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        # Executa os comandos de criação
+        # Usamos execute_query para garantir que a conexão única seja usada
+        execute_query(create_clientes_table, commit=True)
+        execute_query(create_pedidos_table, commit=True)
+        execute_query(create_itens_pedido_table, commit=True)
 
-        # Habilita chaves estrangeiras
-        cursor.execute("PRAGMA foreign_keys = ON")
-
-        # Executa a criação das tabelas
-        cursor.execute(create_clientes_table)
-        cursor.execute(create_pedidos_table)
-        cursor.execute(create_itens_pedido_table)
-
-        # Executa a criação dos índices
-        cursor.execute(create_idx_cliente_nome)
-        cursor.execute(create_idx_pedido_cliente)
-        cursor.execute(create_idx_item_pedido)
-
-        conn.commit()
         log.info("Banco de dados pronto.")
 
-    except sqlite3.Error as e:
-        log.error(f"Erro ao inicializar o banco de dados: {e}")
-        if conn:
-            conn.rollback()
-        raise  # Propaga o erro para o main.py
-    finally:
-        if conn:
-            conn.close()
+    except Exception as e:
+        log.error(f"Falha ao inicializar o banco de dados: {e}", exc_info=True)
+        raise
 
 
-def execute_query(query, params=(), commit=False, fetch_all=False, fetch_one=False):
+# --- Função de Execução Genérica ---
+
+def execute_query(query, params=(), commit=False, fetch_all=False, fetch_one=False, fetch_last_row_id=False):
     """
-    Função utilitária para executar consultas SQL no banco de dados.
-    Gerencia conexão, cursor, transações e tratamento de erros.
+    Executa um comando SQL genérico no banco de dados.
 
-    Args:
-        query (str): A consulta SQL (com placeholders '?').
-        params (tuple, optional): Os parâmetros para a consulta.
-        commit (bool, optional): Define se a transação deve ser comitada (INSERT, UPDATE, DELETE).
-        fetch_all (bool, optional): Define se deve retornar todos os resultados (SELECT).
-        fetch_one (bool, optional): Define se deve retornar apenas um resultado (SELECT).
-
-    Returns:
-        list or tuple or None: O resultado da consulta (se fetch_all ou fetch_one) ou None.
-
-    Raises:
-        sqlite3.Error: Propaga erros do SQLite para o chamador (Model).
+    Parâmetros:
+        query (str): O comando SQL a ser executado.
+        params (tuple): Parâmetros para a query (para evitar SQL Injection).
+        commit (bool): Se True, executa con.commit() (para INSERT, UPDATE, DELETE).
+        fetch_all (bool): Se True, retorna todos os resultados (para SELECT).
+        fetch_one (bool): Se True, retorna o primeiro resultado (para SELECT).
+        fetch_last_row_id (bool): Se True, retorna o ID da última linha inserida.
     """
-
-    # Garante que fetch_all e fetch_one não sejam usados juntos
-    if fetch_all and fetch_one:
-        log.error("execute_query chamada com fetch_all e fetch_one.")
-        raise ValueError("fetch_all e fetch_one não podem ser True simultaneamente.")
-
-    conn = None
-    result = None
-
+    con = None
     try:
-        conn = sqlite3.connect(DB_FILE)
-        # Habilita chaves estrangeiras para CADA conexão
-        conn.execute("PRAGMA foreign_keys = ON")
+        con = get_db_connection()  # Obtém a conexão singleton
+        cursor = con.cursor()
 
-        cursor = conn.cursor()
+        log.debug(f"Executando Query: {query} com Params: {params}")
         cursor.execute(query, params)
 
-        if commit:
-            conn.commit()
-            log.debug(f"Query comitada: {query[:30]}...")
+        result = None
+        query_upper = query.strip().upper()
 
-        if fetch_all:
+        # Lógica de Transação Manual (para models.py)
+        if query_upper.startswith("COMMIT"):
+            con.commit()
+            log.debug("Transação comitada (COMMIT).")
+        elif query_upper.startswith("ROLLBACK"):
+            con.rollback()
+            log.debug("Transação revertida (ROLLBACK).")
+
+        # Lógica de Autocommit (para queries simples)
+        elif commit:
+            con.commit()
+            log.debug("Query comitada (commit=True).")
+
+        # Lógica de Retorno de Dados (só pode ser um)
+        if fetch_last_row_id:
+            result = cursor.lastrowid
+            log.debug(f"Query retornou lastrowid: {result}")
+        elif fetch_all:
             result = cursor.fetchall()
-            log.debug(f"Query (fetch_all) executada. {len(result)} linhas retornadas.")
-
+            log.debug(f"Query retornou fetch_all (count: {len(result) if result else 0}).")
         elif fetch_one:
             result = cursor.fetchone()
-            log.debug(f"Query (fetch_one) executada. Resultado: {'Encontrado' if result else 'Nenhum'}")
+            log.debug(f"Query retornou fetch_one (Result: {'None' if not result else 'OK'}).")
 
-        # Se nem commit, fetch_all ou fetch_one for True,
-        # a query é apenas executada (útil para PRAGMA, etc.)
+        return result
 
     except sqlite3.Error as e:
-        log.error(f"Erro ao executar query: {e}\nQuery: {query}\nParams: {params}")
-        if conn:
-            conn.rollback()  # Desfaz em caso de erro
+        log.error(f"Erro no SQLite ao executar query: {query} | Erro: {e}", exc_info=True)
 
-        # Propaga o erro (o model.py vai tratar IntegrityError, etc.)
-        raise e
+        # Tenta reverter se houver uma transação ativa
+        if con and con.in_transaction:
+            # Evita tentar reverter se a própria query de rollback falhar
+            if not query_upper.startswith("ROLLBACK"):
+                try:
+                    con.rollback()
+                    log.warning("Erro detectado, transação revertida (ROLLBACK).")
+                except sqlite3.Error as re:
+                    log.critical(f"Falha ao reverter (ROLLBACK) transação após erro: {re}", exc_info=True)
 
-    finally:
-        if conn:
-            conn.close()
-
-    return result
+        raise e  # Levanta a exceção original para o model/controller
 
 
 # --- Bloco de Teste ---
 if __name__ == "__main__":
     """
-    Executado apenas quando 'python db.py' é chamado diretamente.
-    Inicializa o banco de dados.
+    Se este arquivo for executado diretamente,
+    ele apenas inicializa o banco de dados.
     """
-    logging.basicConfig(level=logging.INFO)
-    init_db()
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    log.info("Executando db.py diretamente: Inicializando o banco de dados...")
+
+    try:
+        init_db()
+        log.info("Banco de dados inicializado com sucesso.")
+
+        # Teste de inserção e busca (opcional)
+        log.info("Testando inserção de cliente (se não existir)...")
+        # 'OR IGNORE' ignora o erro se o email (UNIQUE) já existir
+        execute_query(
+            "INSERT OR IGNORE INTO clientes (nome, email, telefone) VALUES (?, ?, ?)",
+            ("Cliente Teste", "teste@db.com", "123456"),
+            commit=True
+        )
+
+        log.info("Testando busca de cliente...")
+        cliente = execute_query("SELECT * FROM clientes WHERE email = ?", ("teste@db.com",), fetch_one=True)
+        if cliente:
+            log.info(f"Cliente de teste encontrado: {cliente}")
+        else:
+            log.error("Cliente de teste não encontrado.")
+
+    except Exception as e:
+        log.critical(f"Falha na execução de db.py: {e}", exc_info=True)
+    finally:
+        close_db_connection()
 

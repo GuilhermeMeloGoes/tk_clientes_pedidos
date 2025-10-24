@@ -1,13 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
-
-# Importa as validações
-try:
-    import utils
-except ImportError:
-    logging.warning("Módulo 'utils.py' não encontrado. Validações locais serão usadas.")
-    utils = None
+import re  # Importa 're' para a validação de email
 
 log = logging.getLogger(__name__)
 
@@ -171,7 +165,7 @@ class ClienteFormWindow(tk.Toplevel):
         self.mode = mode
         self.on_save_callback = on_save
         self.cliente_data = cliente_data if cliente_data else {}
-        self.is_dirty = False  # Flag para dados não salvos
+        self.is_dirty = tk.BooleanVar(value=False)  # Flag para dados não salvos
 
         self.title("Novo Cliente" if self.mode == 'new' else "Editar Cliente")
 
@@ -233,44 +227,56 @@ class ClienteFormWindow(tk.Toplevel):
         """Marca o formulário como 'sujo' (dados alterados)."""
         self.is_dirty.set(True)
 
+    # --- Funções de Validação Locais ---
+    # (Movidas para cá para remover a dependência do utils.py)
+
+    def _validate_not_empty(self, value, field_name):
+        """Validação local: campo não pode ser vazio."""
+        if not value or not value.strip():
+            messagebox.showwarning("Campo Obrigatório", f"O campo '{field_name}' não pode estar vazio.", parent=self)
+            return False
+        return True
+
+    def _validate_email_format(self, email):
+        """Validação local: formato de email simples (deve conter '@')."""
+        # Um regex simples para email (pode ser melhorado se necessário)
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            messagebox.showwarning("Formato Inválido", "O formato do E-mail é inválido.", parent=self)
+            return False
+        return True
+
+    def _validate_telefone_format(self, telefone):
+        """Validação local: telefone deve ter 8-15 dígitos."""
+        # Remove caracteres não numéricos (parênteses, traços)
+        digits_only = re.sub(r'\D', '', telefone)
+
+        if 8 <= len(digits_only) <= 15:
+            return True
+        else:
+            messagebox.showwarning("Formato Inválido", "O Telefone deve conter entre 8 e 15 dígitos numéricos.",
+                                   parent=self)
+            return False
+
     def _validate_fields(self, data):
-        """Valida os campos usando 'utils' se disponível, senão validações locais."""
+        """Valida os campos usando as funções locais."""
         nome = data['nome']
         email = data['email']
         telefone = data['telefone']
 
         # 1. Validação de Nome (Obrigatório)
-        if utils:
-            is_valid, msg = utils.validate_not_empty(nome, "Nome")
-        else:  # Fallback local
-            is_valid, msg = (len(nome) > 0, "O campo Nome é obrigatório.")
-
-        if not is_valid:
-            messagebox.showwarning("Campo Inválido", msg, parent=self)
+        if not self._validate_not_empty(nome, "Nome"):
             self.nome_entry.focus()
             return False
 
         # 2. Validação de Email (Formato)
         if email:  # Email é opcional, mas se preenchido, deve ser válido
-            if utils:
-                is_valid, msg = utils.validate_email_format(email)
-            else:  # Fallback local
-                is_valid, msg = ("@" in email, "Formato de e-mail inválido.")
-
-            if not is_valid:
-                messagebox.showwarning("Campo Inválido", msg, parent=self)
+            if not self._validate_email_format(email):
                 self.email_entry.focus()
                 return False
 
         # 3. Validação de Telefone (Formato)
         if telefone:  # Telefone também é opcional
-            if utils:
-                is_valid, msg = utils.validate_telefone_format(telefone)
-            else:  # Fallback local
-                is_valid, msg = (telefone.isdigit(), "Telefone deve conter apenas números.")
-
-            if not is_valid:
-                messagebox.showwarning("Campo Inválido", msg, parent=self)
+            if not self._validate_telefone_format(telefone):
                 self.telefone_entry.focus()
                 return False
 
@@ -285,6 +291,7 @@ class ClienteFormWindow(tk.Toplevel):
             'telefone': self.telefone_var.get().strip()
         }
 
+        # Chama a validação local corrigida
         if not self._validate_fields(data):
             return  # A validação falhou
 
