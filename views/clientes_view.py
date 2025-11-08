@@ -1,401 +1,499 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import logging
-import re  # Importa 're' para a validação de email
-
-log = logging.getLogger(__name__)
+from typing import Callable, Optional, Dict, Any, List, Tuple
 
 
-class ClienteListView(ttk.Frame):
+class ClientesViewFrame(ttk.Frame):
     """
-    View principal para listar, buscar e gerenciar Clientes.
-    Usa callbacks para se comunicar com o controlador (main.py).
+    Frame principal para listar e gerenciar clientes.
+    Contém a Treeview, botões de ação e barra de busca.
     """
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self,
+                 master: tk.Widget,
+                 on_open_new_callback: Callable[[], None],
+                 on_open_edit_callback: Callable[[Dict[str, Any]], None],
+                 on_delete_callback: Callable[[int], None],
+                 on_search_callback: Callable[[str], None]
+                 ):
+        """
+        Inicializa o frame da lista de clientes.
 
-        # Callbacks (serão definidos pelo controlador via set_callbacks)
-        self.on_search = None
-        self.on_add = None
-        self.on_edit = None
-        self.on_delete = None
+        :param master: O widget pai (ex: um Notebook ou a janela principal).
+        :param on_open_new_callback: Callback para o botão 'Novo'.
+        :param on_open_edit_callback: Callback para o botão 'Editar'.
+        :param on_delete_callback: Callback para o botão 'Excluir'.
+        :param on_search_callback: Callback para o botão 'Buscar'.
+        """
+        super().__init__(master, padding="10")
 
-        self._setup_widgets()
+        self.on_open_new = on_open_new_callback
+        self.on_open_edit = on_open_edit_callback
+        self.on_delete = on_delete_callback
+        self.on_search = on_search_callback
 
-    def set_callbacks(self, on_search, on_add, on_edit, on_delete):
-        """Define as funções de callback do controlador."""
-        self.on_search = on_search
-        self.on_add = on_add
-        self.on_edit = on_edit
-        self.on_delete = on_delete
-
-    def _setup_widgets(self):
-        # Frame de busca e botões
-        top_frame = ttk.Frame(self)
-        top_frame.pack(fill='x', pady=5, padx=5)
-
+        # Variável de controle para a busca
         self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(top_frame, textvariable=self.search_var, width=30)
-        search_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
 
-        search_button = ttk.Button(top_frame, text="Buscar", command=self._on_search_click)
-        search_button.pack(side='left', padx=5)
+        # Cria os widgets
+        self.create_widgets()
 
-        add_button = ttk.Button(top_frame, text="Novo Cliente", command=self._on_add_click)
-        add_button.pack(side='right', padx=5)
+    def create_widgets(self):
+        """Cria e posiciona os widgets no frame."""
 
-        self.edit_button = ttk.Button(top_frame, text="Editar Cliente", state='disabled', command=self._on_edit_click)
-        self.edit_button.pack(side='right', padx=5)
+        # --- Frame de Ações (Topo) ---
+        top_frame = ttk.Frame(self)
+        top_frame.pack(fill="x", pady=(0, 10))
 
-        self.delete_button = ttk.Button(top_frame, text="Excluir Cliente", state='disabled',
-                                        command=self._on_delete_click)
-        self.delete_button.pack(side='right')
+        # Busca
+        ttk.Label(top_frame, text="Buscar:").pack(side="left", padx=(0, 5))
+        self.search_entry = ttk.Entry(top_frame, textvariable=self.search_var, width=25)
+        self.search_entry.pack(side="left", padx=5, fill="x", expand=True)
 
-        # Bind <Return> (Enter) na barra de busca para acionar a busca
-        search_entry.bind('<Return>', self._on_search_click)
+        self.search_button = ttk.Button(top_frame, text="Buscar", command=self._on_search_click)
+        self.search_button.pack(side="left", padx=5)
 
-        # --- Treeview para listar clientes ---
-        columns = ('id', 'nome', 'email', 'telefone')
-        self.tree = ttk.Treeview(self, columns=columns, show='headings', selectmode='browse')
+        # Bind <Return> (Enter) na barra de busca
+        self.search_entry.bind("<Return>", self._on_search_click)
 
-        # Define cabeçalhos
-        self.tree.heading('id', text='ID')
-        self.tree.heading('nome', text='Nome')
-        self.tree.heading('email', text='E-mail')
-        self.tree.heading('telefone', text='Telefone')
+        # Botões de Ação
+        self.delete_button = ttk.Button(top_frame, text="Excluir", command=self._on_delete_click)
+        self.delete_button.pack(side="right", padx=5)
 
-        # Define largura das colunas
-        self.tree.column('id', width=50, anchor='center')
-        self.tree.column('nome', width=250)
-        self.tree.column('email', width=250)
-        self.tree.column('telefone', width=150)
+        self.edit_button = ttk.Button(top_frame, text="Editar", command=self._on_edit_click)
+        self.edit_button.pack(side="right", padx=5)
 
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(self, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.new_button = ttk.Button(top_frame, text="Novo Cliente", command=self.on_open_new)
+        self.new_button.pack(side="right", padx=5)
 
-        scrollbar.pack(side='right', fill='y')
-        self.tree.pack(fill='both', expand=True, padx=5, pady=5)
+        # --- Frame da Treeview (Centro) ---
+        tree_frame = ttk.Frame(self)
+        tree_frame.pack(fill="both", expand=True)
 
-        # Binds de seleção
-        self.tree.bind('<<TreeviewSelect>>', self._on_item_select)
-        self.tree.bind('<Double-1>', self._on_double_click)
+        # Colunas da Treeview
+        columns = ("id", "nome", "email", "telefone")
 
-    def _on_item_select(self, event=None):
-        """Habilita botões 'Editar' e 'Excluir' quando um item é selecionado."""
-        if self.tree.selection():
-            self.edit_button.config(state='normal')
-            self.delete_button.config(state='normal')
-        else:
-            self.edit_button.config(state='disabled')
-            self.delete_button.config(state='disabled')
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
 
-    def _get_selected_id(self):
-        """Retorna o ID do cliente selecionado no Treeview."""
-        try:
-            selected_item = self.tree.selection()[0]
-            # O ID está na coluna 'id' (primeiro valor da tupla 'values')
-            item_data = self.tree.item(selected_item)
-            return item_data['values'][0]
-        except IndexError:
-            log.warning("Tentativa de ação (editar/excluir) sem item selecionado.")
+        # Configuração das Colunas
+        self.tree.heading("id", text="ID")
+        self.tree.column("id", width=50, stretch=False, anchor="center")
+
+        self.tree.heading("nome", text="Nome")
+        self.tree.column("nome", width=200)
+
+        self.tree.heading("email", text="E-mail")
+        self.tree.column("email", width=250)
+
+        self.tree.heading("telefone", text="Telefone")
+        self.tree.column("telefone", width=120, anchor="center")
+
+        # Scrollbars
+        scrollbar_y = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+
+        # Posicionamento (Grid dentro do tree_frame)
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar_y.grid(row=0, column=1, sticky="ns")
+        scrollbar_x.grid(row=1, column=0, sticky="ew")
+
+    def _get_selected_item_data(self) -> Optional[Dict[str, Any]]:
+        """
+        Retorna os dados do item selecionado na Treeview.
+        Retorna um dicionário ou None se nada for selecionado.
+        """
+        selected_iid = self.tree.focus()  # IID (Internal ID)
+        if not selected_iid:
             return None
 
-    def _on_search_click(self, event=None):
-        """Callback para o botão 'Buscar'."""
-        if self.on_search:
-            term = self.search_var.get()
-            self.on_search(term)
+        item_values = self.tree.item(selected_iid, "values")
+        if not item_values:
+            return None
 
-    def _on_add_click(self):
-        """Callback para o botão 'Novo Cliente'."""
-        if self.on_add:
-            self.on_add()
+        # Mapeia os valores de volta para um dicionário
+        data = {
+            "id": int(item_values[0]),
+            "nome": item_values[1],
+            "email": item_values[2],
+            "telefone": item_values[3]
+        }
+        return data
+
+    def _on_search_click(self, event=None):
+        """Callback do botão de busca (ou Enter)."""
+        search_term = self.search_var.get().strip()
+        self.on_search(search_term)
 
     def _on_edit_click(self):
-        """Callback para o botão 'Editar Cliente'."""
-        selected_id = self._get_selected_id()
-        if selected_id and self.on_edit:
-            self.on_edit(selected_id)
-
-    def _on_double_click(self, event):
-        """Callback para clique duplo (aciona edição)."""
-        # Verifica se o clique foi em um item, não no cabeçalho
-        if self.tree.identify_region(event.x, event.y) == "cell":
-            self._on_edit_click()
+        """Callback do botão 'Editar'."""
+        selected_data = self._get_selected_item_data()
+        if selected_data:
+            self.on_open_edit(selected_data)
+        else:
+            messagebox.showinfo("Nenhum Cliente Selecionado",
+                                "Por favor, selecione um cliente na lista para editar.",
+                                parent=self)
 
     def _on_delete_click(self):
-        """Callback para o botão 'Excluir Cliente'."""
-        selected_id = self._get_selected_id()
-        if selected_id and self.on_delete:
-            self.on_delete(selected_id)
+        """Callback do botão 'Excluir'."""
+        selected_data = self._get_selected_item_data()
 
-    def refresh_treeview(self, data):
-        """Limpa e recarrega o Treeview com novos dados."""
-        # Limpa a tabela
-        for i in self.tree.get_children():
-            self.tree.delete(i)
+        if not selected_data:
+            messagebox.showinfo("Nenhum Cliente Selecionado",
+                                "Por favor, selecione um cliente na lista para excluir.",
+                                parent=self)
+            return
 
-        # Insere novos dados
-        # Espera dados no formato [(id, nome, email, telefone), ...]
-        for row in data:
-            self.tree.insert('', 'end', values=row)
+        # Confirmação de exclusão
+        nome = selected_data['nome']
+        if messagebox.askyesno("Confirmar Exclusão",
+                               f"Tem certeza que deseja excluir o cliente '{nome}'?\n\n(ID: {selected_data['id']})",
+                               parent=self):
+            self.on_delete(selected_data['id'])
 
-        # Limpa a seleção após recarregar
-        self._on_item_select()
+    def refresh_data(self, clientes_list: List[Tuple]):
+        """
+        Limpa a Treeview e a recarrega com novos dados.
 
-    def show_confirm(self, title, message):
-        """Exibe um popup de confirmação (usado pelo controlador)."""
-        return messagebox.askyesno(title, message, parent=self)
+        :param clientes_list: Uma lista de tuplas, onde cada tupla
+                              corresponde aos dados de um cliente
+                              (id, nome, email, telefone).
+        """
+        # Limpa todos os itens existentes
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        # Insere os novos dados
+        for cliente_data in clientes_list:
+            # (id, nome, email, telefone)
+            self.tree.insert("", tk.END, values=cliente_data)
+
+        # Limpa a barra de busca (opcional, mas bom para feedback)
+        # self.search_var.set("")
 
 
-# --- Formulário de Cliente (Janela Toplevel) ---
+# =============================================================================
+# === CLASSE DO FORMULÁRIO (JÁ CRIADA ANTERIORMENTE) ===
+# =============================================================================
 
-class ClienteFormWindow(tk.Toplevel):
+class ClienteForm(tk.Toplevel):
     """
-    Janela Toplevel para cadastrar ou editar um cliente.
+    Janela Toplevel modal para cadastrar ou editar um cliente.
+    (Esta é a classe da sua solicitação anterior, mantida no mesmo arquivo)
     """
 
-    def __init__(self, parent, mode='new', on_save=None, cliente_data=None):
-        super().__init__(parent)
-        self.transient(parent)  # Mantém a janela no topo
-        self.resizable(False, False)
+    def __init__(self,
+                 master: tk.Tk,
+                 on_save_callback: Callable[[Dict[str, Any]], None],
+                 on_cancel_callback: Callable[[], None],
+                 cliente: Optional[Dict[str, Any]] = None):
+        """
+        Inicializa o formulário.
 
-        self.mode = mode
-        self.on_save_callback = on_save
-        self.cliente_data = cliente_data if cliente_data else {}
-        self.is_dirty = tk.BooleanVar(value=False)  # Flag para dados não salvos
+        :param master: A janela principal (root).
+        :param on_save_callback: Função a ser chamada ao salvar. Recebe um dict com os dados.
+        :param on_cancel_callback: Função a ser chamada ao cancelar ou fechar.
+        :param cliente: Um dicionário com dados do cliente para preencher (modo de edição).
+        """
+        super().__init__(master)
 
-        self.title("Novo Cliente" if self.mode == 'new' else "Editar Cliente")
+        # Configurações do Toplevel
+        self.master = master
+        self.on_save_callback = on_save_callback
+        self.on_cancel_callback = on_cancel_callback
+        self.current_cliente_id = cliente.get('id', None) if cliente else None
 
-        # --- Variáveis dos campos ---
+        if cliente:
+            self.title("Editar Cliente")
+        else:
+            self.title("Novo Cliente")
+
+        # Variáveis de controle do Tkinter
         self.nome_var = tk.StringVar()
         self.email_var = tk.StringVar()
         self.telefone_var = tk.StringVar()
 
-        self._setup_widgets()
-        self._load_data()
+        # Cria os widgets
+        self.create_widgets()
 
-        # Bind para o "X" da janela
-        self.protocol("WM_DELETE_WINDOW", self._on_close_window)
+        # Carrega os dados se for modo de edição
+        if cliente:
+            self.load_data(cliente)
 
-        # Bind para rastrear alterações
-        self.nome_var.trace_add("write", self._mark_as_dirty)
-        self.email_var.trace_add("write", self._mark_as_dirty)
-        self.telefone_var.trace_add("write", self._mark_as_dirty)
+        # Flag para verificar se o usuário alterou algum dado
+        self.is_dirty = False
+        # Adiciona traces *depois* de carregar os dados
+        self.nome_var.trace_add("write", self._set_dirty)
+        self.email_var.trace_add("write", self._set_dirty)
+        self.telefone_var.trace_add("write", self._set_dirty)
 
-    def _setup_widgets(self):
-        main_frame = ttk.Frame(self, padding=20)
-        main_frame.pack(fill='both', expand=True)
+        # Configuração de modal
+        self.transient(master)  # Mantém a janela na frente
+        self.grab_set()  # Torna a janela modal
 
-        # --- Labels e Entradas ---
-        ttk.Label(main_frame, text="Nome:").grid(row=0, column=0, sticky='w', pady=5)
-        self.nome_entry = ttk.Entry(main_frame, textvariable=self.nome_var, width=40)
-        self.nome_entry.grid(row=0, column=1, sticky='we', pady=5, padx=5)
-        self.nome_entry.focus_set()  # Foco inicial
+        # Intercepta o botão de fechar (o "X")
+        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
 
-        ttk.Label(main_frame, text="E-mail:").grid(row=1, column=0, sticky='w', pady=5)
-        self.email_entry = ttk.Entry(main_frame, textvariable=self.email_var, width=40)
-        self.email_entry.grid(row=1, column=1, sticky='we', pady=5, padx=5)
+        # Centraliza a janela em relação ao 'master'
+        self.center_window()
 
-        ttk.Label(main_frame, text="Telefone:").grid(row=2, column=0, sticky='w', pady=5)
-        self.telefone_entry = ttk.Entry(main_frame, textvariable=self.telefone_var, width=40)
-        self.telefone_entry.grid(row=2, column=1, sticky='we', pady=5, padx=5)
+        # Foca no primeiro campo de entrada
+        self.nome_entry.focus_set()
+
+    def create_widgets(self):
+        """Cria e posiciona os widgets no formulário."""
+
+        # Frame principal com padding
+        main_frame = ttk.Frame(self, padding="15 15 15 15")
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+
+        # --- Campos do Formulário ---
+        form_frame = ttk.Frame(main_frame)
+        form_frame.grid(row=0, column=0, sticky="ew")
+
+        # Nome
+        ttk.Label(form_frame, text="Nome:*").grid(row=0, column=0, sticky="w", pady=(0, 5))
+        self.nome_entry = ttk.Entry(form_frame, textvariable=self.nome_var, width=40)
+        self.nome_entry.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+
+        # Email
+        ttk.Label(form_frame, text="E-mail:").grid(row=2, column=0, sticky="w", pady=(0, 5))
+        self.email_entry = ttk.Entry(form_frame, textvariable=self.email_var, width=40)
+        self.email_entry.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+
+        # Telefone
+        ttk.Label(form_frame, text="Telefone:").grid(row=4, column=0, sticky="w", pady=(0, 5))
+        self.telefone_entry = ttk.Entry(form_frame, textvariable=self.telefone_var, width=40)
+        self.telefone_entry.grid(row=5, column=0, sticky="ew", pady=(0, 15))
+
+        # Informa que * é obrigatório
+        ttk.Label(form_frame, text="* campo obrigatório").grid(row=6, column=0, sticky="w", pady=(0, 10))
+
+        # Configura a coluna do form_frame para expandir
+        form_frame.columnconfigure(0, weight=1)
 
         # --- Botões ---
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=3, column=0, columnspan=2, pady=(15, 0), sticky='e')
+        button_frame.grid(row=1, column=0, sticky="e", pady=(10, 0))
 
-        self.save_button = ttk.Button(button_frame, text="Salvar", command=self._on_save_internal)
-        self.save_button.pack(side='left', padx=5)
+        self.save_button = ttk.Button(button_frame, text="Salvar", command=self.on_save)
+        self.save_button.grid(row=0, column=0, padx=5)
 
-        self.cancel_button = ttk.Button(button_frame, text="Cancelar", command=self._on_close_window)
-        self.cancel_button.pack(side='left')
+        self.cancel_button = ttk.Button(button_frame, text="Cancelar", command=self.on_cancel)
+        self.cancel_button.grid(row=0, column=1, padx=5)
 
-    def _load_data(self):
-        """Carrega dados do cliente se estiver no modo 'edit'."""
-        if self.mode == 'edit' and self.cliente_data:
-            self.nome_var.set(self.cliente_data.get('nome', ''))
-            self.email_var.set(self.cliente_data.get('email', ''))
-            self.telefone_var.set(self.cliente_data.get('telefone', ''))
+    def load_data(self, cliente: Dict[str, Any]):
+        """Preenche os campos com os dados do cliente (modo de edit)."""
+        self.nome_var.set(cliente.get('nome', ''))
+        self.email_var.set(cliente.get('email', ''))
+        self.telefone_var.set(cliente.get('telefone', ''))
 
-        # Reseta o 'dirty' flag após carregar os dados
-        self.after(100, lambda: self.is_dirty.set(False))  # Atraso para o trace não disparar
+    def _set_dirty(self, *args):
+        """Marca o formulário como 'modificado'."""
+        self.is_dirty = True
 
-    def _mark_as_dirty(self, *args):
-        """Marca o formulário como 'sujo' (dados alterados)."""
-        self.is_dirty.set(True)
+    def validate(self) -> bool:
+        """
+        Valida os campos do formulário antes de salvar.
+        Retorna True se válido, False caso contrário.
+        """
+        nome = self.nome_var.get().strip()
+        email = self.email_var.get().strip()
+        telefone = self.telefone_var.get().strip()
 
-    # --- Funções de Validação Locais ---
-    # (Movidas para cá para remover a dependência do utils.py)
-
-    def _validate_not_empty(self, value, field_name):
-        """Validação local: campo não pode ser vazio."""
-        if not value or not value.strip():
-            messagebox.showwarning("Campo Obrigatório", f"O campo '{field_name}' não pode estar vazio.", parent=self)
-            return False
-        return True
-
-    def _validate_email_format(self, email):
-        """Validação local: formato de email simples (deve conter '@')."""
-        # Um regex simples para email (pode ser melhorado se necessário)
-        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-            messagebox.showwarning("Formato Inválido", "O formato do E-mail é inválido.", parent=self)
-            return False
-        return True
-
-    def _validate_telefone_format(self, telefone):
-        """Validação local: telefone deve ter 8-15 dígitos."""
-        # Remove caracteres não numéricos (parênteses, traços)
-        digits_only = re.sub(r'\D', '', telefone)
-
-        if 8 <= len(digits_only) <= 15:
-            return True
-        else:
-            messagebox.showwarning("Formato Inválido", "O Telefone deve conter entre 8 e 15 dígitos numéricos.",
-                                   parent=self)
+        # 1. Validação do Nome (Obrigatório)
+        if not nome:
+            messagebox.showwarning("Campo Obrigatório", "O campo 'Nome' é obrigatório.", parent=self)
+            self.nome_entry.focus_set()
             return False
 
-    def _validate_fields(self, data):
-        """Valida os campos usando as funções locais."""
-        nome = data['nome']
-        email = data['email']
-        telefone = data['telefone']
-
-        # 1. Validação de Nome (Obrigatório)
-        if not self._validate_not_empty(nome, "Nome"):
-            self.nome_entry.focus()
+        # 2. Validação do E-mail (Formato simples)
+        if email and ("@" not in email or "." not in email):
+            messagebox.showwarning("Formato Inválido", "O 'E-mail' parece estar em um formato inválido.", parent=self)
+            self.email_entry.focus_set()
             return False
 
-        # 2. Validação de Email (Formato)
-        if email:  # Email é opcional, mas se preenchido, deve ser válido
-            if not self._validate_email_format(email):
-                self.email_entry.focus()
+        # 3. Validação do Telefone (8-15 dígitos)
+        if telefone:
+            # Remove caracteres comuns (parênteses, traços, espaços)
+            telefone_digitos = "".join(filter(str.isdigit, telefone))
+
+            if not (8 <= len(telefone_digitos) <= 15):
+                messagebox.showwarning("Formato Inválido",
+                                       "O 'Telefone' deve ter entre 8 e 15 dígitos.",
+                                       parent=self)
+                self.telefone_entry.focus_set()
                 return False
 
-        # 3. Validação de Telefone (Formato)
-        if telefone:  # Telefone também é opcional
-            if not self._validate_telefone_format(telefone):
-                self.telefone_entry.focus()
-                return False
+            # (Opcional) Salva apenas os dígitos de volta na variável
+            # self.telefone_var.set(telefone_digitos)
 
         return True
 
-    def _on_save_internal(self):
-        """Lógica interna ao clicar em 'Salvar'."""
+    def on_save(self):
+        """Callback do botão 'Salvar'."""
+        if not self.validate():
+            return  # Para a execução se a validação falhar
+
+        # Coleta os dados validados
         data = {
-            'id': self.cliente_data.get('id') if self.mode == 'edit' else None,
-            'nome': self.nome_var.get().strip(),
-            'email': self.email_var.get().strip(),
-            'telefone': self.telefone_var.get().strip()
+            "id": self.current_cliente_id,  # Será None para novos clientes
+            "nome": self.nome_var.get().strip(),
+            "email": self.email_var.get().strip(),
+            "telefone": self.telefone_var.get().strip()
         }
 
-        # Chama a validação local corrigida
-        if not self._validate_fields(data):
-            return  # A validação falhou
+        # Limpa os campos opcionais se estiverem vazios
+        if not data["email"]:
+            data["email"] = None
+        if not data["telefone"]:
+            data["telefone"] = None
 
-        if self.on_save_callback:
-            # Chama o callback (no main.py) e verifica se foi bem sucedido
-            success = self.on_save_callback(data)
-            if success:
-                self.is_dirty.set(False)  # Marca como "limpo" para fechar
-                self.destroy()
+        # Chama o callback externo
+        try:
+            self.on_save_callback(data)
+            self.is_dirty = False  # Marca como "limpo" antes de fechar
+            self.destroy()  # Fecha a janela
+        except Exception as e:
+            # Exibe erros que podem vir da camada de modelo/banco (ex: email duplicado)
+            # Log simples no console
+            print(f"ERRO [ClienteForm.on_save]: {e}")
+            # Mensagem amigável para o usuário
+            messagebox.showerror("Erro ao Salvar", f"Ocorreu um erro ao salvar:\n{e}", parent=self)
 
-    def _on_close_window(self):
-        """Chamado ao clicar em 'Cancelar' ou no 'X'."""
-        if self.is_dirty.get():
-            if messagebox.askyesno("Descartar Alterações?",
-                                   "Você possui alterações não salvas. Deseja realmente fechar?",
-                                   parent=self):
-                self.destroy()
-        else:
-            self.destroy()
+    def on_cancel(self):
+        """Callback do botão 'Cancelar' ou do 'X' da janela."""
+
+        # Verifica se há dados não salvos
+        if self.is_dirty:
+            if not messagebox.askyesno("Descartar Alterações?",
+                                       "Você fez alterações que não foram salvas. "
+                                       "Deseja fechar e descartar?",
+                                       parent=self):
+                return  # Não fecha
+
+        self.on_cancel_callback()
+        self.destroy()
+
+    def center_window(self):
+        """Centraliza o Toplevel na janela principal."""
+        self.update_idletasks()  # Garante que as dimensões da janela estão atualizadas
+
+        master_x = self.master.winfo_x()
+        master_y = self.master.winfo_y()
+        master_width = self.master.winfo_width()
+        master_height = self.master.winfo_height()
+
+        my_width = self.winfo_width()
+        my_height = self.winfo_height()
+
+        x = master_x + (master_width // 2) - (my_width // 2)
+        y = master_y + (master_height // 2) - (my_height // 2)
+
+        self.geometry(f'+{x}+{y}')  # Define apenas a posição
 
 
-# --- Bloco de Teste (para executar o arquivo isoladamente) ---
-
+# --- Bloco de Teste ---
 if __name__ == "__main__":
-    # Configuração de logging para teste
-    logging.basicConfig(level=logging.DEBUG)
 
+    # --- Configuração da Janela Principal de Teste ---
     root = tk.Tk()
-    root.title("Teste de ClienteListView")
-    root.geometry("700x400")
+    root.title("Teste da ClientesViewFrame")
+    root.geometry("800x500")
 
+    # Centraliza
+    root.update_idletasks()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = (screen_width // 2) - (800 // 2)
+    y = (screen_height // 2) - (500 // 2)
+    root.geometry(f'800x500+{x}+{y}')
 
-    # --- Funções de Callback Simuladas ---
-    def sim_search(term):
-        print(f"TESTE: Buscando por '{term}'")
-        # Simula dados de busca
-        dados_simulados_busca = [
-            (3, 'Cliente Encontrado', 'search@test.com', '99999999')
-        ]
-        view.refresh_treeview(dados_simulados_busca)
-
-
-    def sim_add():
-        print("TESTE: Abrindo formulário de Adicionar")
-        form = ClienteFormWindow(root, mode='new', on_save=sim_save_new)
-        form.grab_set()
-
-
-    def sim_edit(client_id):
-        print(f"TESTE: Abrindo formulário de Editar para ID {client_id}")
-        # Simula a busca dos dados do cliente
-        dados_cliente = {'id': client_id, 'nome': 'Cliente para Editar', 'email': 'edit@test.com',
-                         'telefone': '12345678'}
-        form = ClienteFormWindow(root, mode='edit', on_save=sim_save_edit, cliente_data=dados_cliente)
-        form.grab_set()
-
-
-    def sim_delete(client_id):
-        print(f"TESTE: Excluindo cliente ID {client_id}")
-        if view.show_confirm("Teste de Exclusão", f"Excluir ID {client_id}?"):
-            print("TESTE: Exclusão confirmada.")
-            # Simula a atualização da lista
-            view.refresh_treeview(dados_simulados)  # Recarrega lista original
-        else:
-            print("TESTE: Exclusão cancelada.")
-
-
-    # --- Funções de Save Simuladas ---
-    def sim_save_new(data):
-        print(f"TESTE: Salvando NOVO cliente: {data}")
-        # Simula sucesso
-        return True
-
-
-    def sim_save_edit(data):
-        print(f"TESTE: Salvando cliente EDITADO: {data}")
-        # Simula falha
-        # messagebox.showerror("Erro Simulado", "Não foi possível salvar.")
-        # return False
-
-        # Simula sucesso
-        return True
-
-
-    # --- Inicialização da View ---
-    view = ClienteListView(root)
-    view.pack(fill="both", expand=True)
-
-    # Conecta os callbacks simulados
-    view.set_callbacks(
-        on_search=sim_search,
-        on_add=sim_add,
-        on_edit=sim_edit,
-        on_delete=sim_delete
-    )
-
-    # Dados de teste
-    dados_simulados = [
-        (1, 'Alice Silva', 'alice@exemplo.com', '11987654321'),
-        (2, 'Bruno Costa', 'bruno@exemplo.com', '21912345678')
+    # --- Dados Falsos (Mock Data) ---
+    mock_data = [
+        (1, "Ana Silva", "ana.silva@email.com", "11987654321"),
+        (2, "Bruno Costa", "bruno.costa@email.com", "21912345678"),
+        (3, "Carla Dias", "carla.dias@email.com", "31998877665"),
+        (4, "Daniel Moreira", "daniel.m@email.com", "41976543210"),
     ]
 
-    # Carrega os dados na view
-    view.refresh_treeview(dados_simulados)
+
+    # --- Callbacks de Teste ---
+    def on_save_teste(data):
+        print(f"--- SALVANDO (Mock) ---")
+        print(data)
+        messagebox.showinfo("Salvo (Teste)", "Cliente salvo! (Veja o console)\n"
+                                             "A lista será recarregada agora.")
+        # Simula a recarga
+        # Em um app real, o controller buscaria os dados ATUALIZADOS do banco
+        if data.get("id") is None:  # Novo cliente
+            new_id = max(d[0] for d in mock_data) + 1 if mock_data else 1
+            mock_data.append((new_id, data['nome'], data['email'], data['telefone']))
+        else:  # Edição
+            index = next((i for i, d in enumerate(mock_data) if d[0] == data['id']), -1)
+            if index != -1:
+                mock_data[index] = (data['id'], data['nome'], data['email'], data['telefone'])
+
+        main_view.refresh_data(mock_data)  # Recarrega o frame principal
+
+
+    def on_cancel_teste():
+        print("--- CANCELADO (Formulário) ---")
+
+
+    # Callbacks do Frame Principal
+    def test_abrir_novo():
+        print("--- TESTE: Abrir NOVO formulário ---")
+        ClienteForm(root, on_save_teste, on_cancel_teste, cliente=None)
+
+
+    def test_abrir_editar(data: Dict[str, Any]):
+        print(f"--- TESTE: Abrir EDITAR formulário para: {data} ---")
+        ClienteForm(root, on_save_teste, on_cancel_teste, cliente=data)
+
+
+    def test_excluir(client_id: int):
+        print(f"--- TESTE: Excluir cliente ID: {client_id} ---")
+
+        # Simula a remoção do mock data
+        global mock_data
+        mock_data = [d for d in mock_data if d[0] != client_id]
+        main_view.refresh_data(mock_data)
+
+        messagebox.showinfo("Excluído (Teste)", f"Cliente ID {client_id} excluído.")
+
+
+    def test_buscar(termo: str):
+        print(f"--- TESTE: Buscando por: '{termo}' ---")
+        if not termo:
+            main_v.refresh_data(mock_data)  # Mostra tudo se a busca estiver vazia
+            return
+
+        termo = termo.lower()
+        resultados = [
+            d for d in mock_data
+            if termo in d[1].lower() or (d[2] and termo in d[2].lower())
+        ]
+        main_view.refresh_data(resultados)
+
+
+    # --- Instanciando o Frame Principal ---
+    main_view = ClientesViewFrame(
+        root,
+        on_open_new_callback=test_abrir_novo,
+        on_open_edit_callback=test_abrir_editar,
+        on_delete_callback=test_excluir,
+        on_search_callback=test_buscar
+    )
+    main_view.pack(fill="both", expand=True)
+
+    # Carrega os dados iniciais
+    main_view.refresh_data(mock_data)
 
     root.mainloop()
-

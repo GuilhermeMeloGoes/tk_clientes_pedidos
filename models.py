@@ -1,284 +1,254 @@
-import logging
-from db import execute_query  # Importa a função centralizada de query
+import db
+from typing import List, Dict, Any, Tuple
+import sqlite3  # Necessário para a transação
 
-log = logging.getLogger(__name__)
 
+# --- Funções de Clientes ---
 
-class ClienteModel:
+def get_clientes_data(search_term: str = "") -> List[Tuple]:
     """
-    Classe Model para gerenciar a lógica de negócios e
-    interações com o banco de dados para Clientes.
+    Busca clientes no banco de dados.
+    Se search_term for fornecido, filtra por nome ou email.
+    """
+    if search_term:
+        query = """
+                SELECT id, nome, email, telefone
+                FROM clientes
+                WHERE nome LIKE ? \
+                   OR email LIKE ?
+                ORDER BY nome \
+                """
+        params = (f"%{search_term}%", f"%{search_term}%")
+    else:
+        query = """
+                SELECT id, nome, email, telefone
+                FROM clientes
+                ORDER BY nome \
+                """
+        params = ()
+
+    return db.execute_query(query, params, fetch='all')
+
+
+def get_clientes_combobox_data() -> List[Tuple]:
+    """
+    Retorna uma lista de tuplas (id, nome) para preencher comboboxes.
+    """
+    query = "SELECT id, nome FROM clientes ORDER BY nome"
+    return db.execute_query(query, params=(), fetch='all')
+
+
+def save_cliente(cliente_data: Dict[str, Any]) -> None:
+    """
+    Salva (insere ou atualiza) um cliente no banco de dados.
+    Levanta exceção em caso de falha (ex: email duplicado).
+    """
+    if cliente_data.get("id"):
+        # Atualizar
+        query = """
+                UPDATE clientes
+                SET nome     = ?, \
+                    email    = ?, \
+                    telefone = ?
+                WHERE id = ? \
+                """
+        params = (
+            cliente_data["nome"],
+            cliente_data["email"],
+            cliente_data["telefone"],
+            cliente_data["id"]
+        )
+    else:
+        # Inserir
+        query = """
+                INSERT INTO clientes (nome, email, telefone)
+                VALUES (?, ?, ?) \
+                """
+        params = (
+            cliente_data["nome"],
+            cliente_data["email"],
+            cliente_data["telefone"]
+        )
+
+    db.execute_query(query, params)  # 'fetch' é None (padrão)
+
+
+def delete_cliente(cliente_id: int) -> None:
+    """
+    Exclui um cliente do banco de dados.
+    Levanta exceção se o cliente tiver pedidos associados.
+    """
+    query = "DELETE FROM clientes WHERE id = ?"
+    params = (cliente_id,)
+    db.execute_query(query, params)
+
+
+# --- Funções de Pedidos ---
+
+def save_pedido(pedido_data: Dict[str, Any], itens_list: List[Dict[str, Any]]) -> None:
+    """
+    Salva um novo pedido e seus itens de forma transacional.
+    """
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
+
+        # Ativa chaves estrangeiras (novamente, por segurança na conexão)
+        cursor.execute("PRAGMA foreign_keys = ON;")
+
+        # 1. Inserir o Pedido principal
+        pedido_query = """
+                       INSERT INTO pedidos (cliente_id, data, total)
+                       VALUES (?, ?, ?) \
+                       """
+        pedido_params = (
+            pedido_data["cliente_id"],
+            pedido_data["data"],
+            pedido_data["total"]
+        )
+
+        # Como execute_query não retorna o cursor,
+        # vamos usar o cursor manual para pegar o lastrowid
+
+        cursor.execute(pedido_query, pedido_params)
+        pedido_id = cursor.lastrowid
+
+        if not pedido_id:
+            raise Exception("Falha ao obter o ID do novo pedido.")
+
+        # 2. Inserir os Itens do Pedido
+        item_query = """
+                     INSERT INTO itens_pedido (pedido_id, produto, quantidade, preco_unit)
+                     VALUES (?, ?, ?, ?) \
+                     """
+
+        # Prepara os parâmetros para 'executemany'
+        itens_params_list = []
+        for item in itens_list:
+            itens_params_list.append((
+                pedido_id,
+                item["produto"],
+                item["quantidade"],
+                item["preco_unit"]
+            ))
+
+        cursor.executemany(item_query, itens_params_list)
+
+        # 3. Commit da Transação
+        conn.commit()
+
+    except sqlite3.Error as e:
+        print(f"Erro na transação de salvar pedido: {e}")
+        if conn:
+            conn.rollback()  # Desfaz tudo se algo deu errado
+        raise e  # Re-levanta o erro para o main.py/view
+
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_filtered_pedidos_data(search_term: str = "",
+                              date_start: str = "",
+                              date_end: str = "") -> List[Tuple]:
+    """
+    Busca pedidos no banco de dados com filtros.
+    - search_term: Filtra por nome ou email do cliente.
+    - date_start/date_end: Filtra por intervalo de datas (formato YYYY-MM-DD).
     """
 
-    def __init__(self):
-        log.info("ClienteModel instanciado.")
+    params = []
 
-    def find_clients(self, search_term=""):
-        """
-        Busca clientes no banco de dados por nome ou email.
-        Se search_term estiver vazio, retorna todos os clientes.
-        """
-        try:
-            if search_term:
-                query = "SELECT id, nome, email, telefone FROM clientes WHERE nome LIKE ? OR email LIKE ? "
-                # O termo de busca deve ser formatado para o LIKE
-                term = f"%{search_term}%"
-                params = (term, term)
-            else:
-                query = "SELECT id, nome, email, telefone FROM clientes"
-                params = ()
+    # Query base com JOIN
+    query_base = """
+                 SELECT p.id, p.data, c.nome, p.total
+                 FROM pedidos p
+                          JOIN clientes c ON p.cliente_id = c.id \
+                 """
 
-            # Usa fetch_all=True para obter todos os resultados
-            return execute_query(query, params, fetch_all=True)
+    # Lista de condições WHERE
+    where_conditions = []
 
-        except Exception as e:
-            log.error(f"Erro em find_clients: {e}", exc_info=True)
-            # Levanta a exceção para ser tratada pelo controlador (main.py)
-            raise
+    # 1. Filtro de Busca (Nome/Email)
+    if search_term:
+        where_conditions.append("(c.nome LIKE ? OR c.email LIKE ?)")
+        params.extend([f"%{search_term}%", f"%{search_term}%"])
 
-    def get_client_by_id(self, cliente_id):
-        """Busca um cliente específico pelo ID e retorna como um dicionário."""
-        try:
-            query = "SELECT id, nome, email, telefone FROM clientes WHERE id = ?"
-            # Usa fetch_one=True
-            result = execute_query(query, (cliente_id,), fetch_one=True)
+    # 2. Filtro de Data Inicial
+    if date_start:
+        where_conditions.append("p.data >= ?")
+        params.append(date_start)
 
-            if result:
-                # Converte a tupla (id, nome, email, tel) em um dicionário
-                return {'id': result[0], 'nome': result[1], 'email': result[2], 'telefone': result[3]}
-            return None
+    # 3. Filtro de Data Final
+    if date_end:
+        where_conditions.append("p.data <= ?")
+        params.append(date_end)
 
-        except Exception as e:
-            log.error(f"Erro em get_client_by_id (ID: {cliente_id}): {e}", exc_info=True)
-            raise
+    # Monta a query final
+    if where_conditions:
+        query_final = query_base + " WHERE " + " AND ".join(where_conditions)
+    else:
+        query_final = query_base
 
-    def add_client(self, nome, email, telefone):
-        """Adiciona um novo cliente ao banco de dados."""
-        try:
-            query = "INSERT INTO clientes (nome, email, telefone) VALUES (?, ?, ?)"
-            # Usa commit=True para salvar a alteração
-            execute_query(query, (nome, email, telefone), commit=True)
-            log.info(f"Cliente '{nome}' adicionado com sucesso.")
-            return {"success": True}
-        except Exception as e:
-            log.error(f"Erro ao adicionar cliente '{nome}': {e}", exc_info=True)
-            raise
+    query_final += " ORDER BY p.data DESC"
 
-    def update_client(self, cliente_id, nome, email, telefone):
-        """Atualiza os dados de um cliente existente."""
-        try:
-            query = "UPDATE clientes SET nome = ?, email = ?, telefone = ? WHERE id = ?"
-            # Usa commit=True
-            execute_query(query, (nome, email, telefone, cliente_id), commit=True)
-            log.info(f"Cliente ID {cliente_id} atualizado com sucesso.")
-            return {"success": True}
-        except Exception as e:
-            log.error(f"Erro ao atualizar cliente ID {cliente_id}: {e}", exc_info=True)
-            raise
+    # print(f"DEBUG [get_filtered_pedidos_data] Query: {query_final}\nParams: {tuple(params)}")
 
-    def delete_client(self, cliente_id):
-        """Exclui um cliente do banco de dados."""
-        try:
-            # 1. Verifica se o cliente tem pedidos associados
-            check_query = "SELECT 1 FROM pedidos WHERE cliente_id = ?"
-            has_pedidos = execute_query(check_query, (cliente_id,), fetch_one=True)
-
-            if has_pedidos:
-                msg = f"Não é possível excluir o cliente ID {cliente_id}, pois ele possui pedidos cadastrados."
-                log.warning(msg)
-                return {"success": False, "message": msg}
-
-            # 2. Se não tiver, exclui o cliente
-            query = "DELETE FROM clientes WHERE id = ?"
-            # Usa commit=True
-            execute_query(query, (cliente_id,), commit=True)
-            log.info(f"Cliente ID {cliente_id} excluído com sucesso.")
-            return {"success": True}
-
-        except Exception as e:
-            # Trata erros de integridade (como FK, caso o check falhe)
-            if "FOREIGN KEY constraint failed" in str(e):
-                msg = f"Não é possível excluir o cliente ID {cliente_id} (Constraint Error), pois ele possui pedidos."
-                log.warning(msg)
-                return {"success": False, "message": msg}
-
-            log.error(f"Erro ao excluir cliente ID {cliente_id}: {e}", exc_info=True)
-            raise
-
-    def get_all_clients_list(self):
-        """Retorna uma lista de tuplas (id, nome) de todos os clientes."""
-        try:
-            query = "SELECT id, nome FROM clientes"
-            return execute_query(query, fetch_all=True)
-        except Exception as e:
-            log.error(f"Erro ao buscar lista simples de clientes: {e}", exc_info=True)
-            raise
+    return db.execute_query(query_final, tuple(params), fetch='all')
 
 
-class PedidoModel:
+def delete_pedido(pedido_id: int) -> None:
     """
-    Classe Model para gerenciar a lógica de negócios e
-    interações com o banco de dados para Pedidos.
+    Exclui um pedido do banco de dados.
+    (Os itens são excluídos automaticamente via 'ON DELETE CASCADE')
+    """
+    query = "DELETE FROM pedidos WHERE id = ?"
+    params = (pedido_id,)
+    db.execute_query(query, params)
+
+
+def get_pedido_details(pedido_id: int) -> (Dict[str, Any], List[Dict[str, Any]]):
+    """
+    Busca os detalhes de um pedido (info principal) e seus itens.
+    Usado para a exportação.
     """
 
-    def __init__(self):
-        log.info("PedidoModel instanciado.")
+    # 1. Buscar Informações Principais (JOIN com cliente)
+    pedido_info_query = """
+                        SELECT p.id, p.data, p.total, c.nome as cliente_nome
+                        FROM pedidos p
+                                 JOIN clientes c ON p.cliente_id = c.id
+                        WHERE p.id = ? \
+                        """
+    pedido_info_tuple = db.execute_query(pedido_info_query, (pedido_id,), fetch='one')
 
-    def find_pedidos(self, search_term=""):
-        """
-        Busca pedidos no banco de dados, juntando o nome do cliente.
-        Se search_term estiver vazio, retorna todos os pedidos.
-        """
-        try:
-            # Query base que junta pedidos e clientes
-            base_query = """
-                SELECT p.id, c.nome, p.data, p.total 
-                FROM pedidos p
-                JOIN clientes c ON p.cliente_id = c.id
-            """
+    if not pedido_info_tuple:
+        raise Exception(f"Pedido com ID {pedido_id} não encontrado.")
 
-            if search_term:
-                # Busca pelo nome do cliente ou ID do pedido
-                query = base_query + " WHERE c.nome LIKE ? OR p.id LIKE ?"
-                term = f"%{search_term}%"
-                params = (term, term)
-            else:
-                query = base_query
-                params = ()
+    # Converte a tupla de info para dicionário
+    pedido_info_dict = {
+        "id": pedido_info_tuple[0],
+        "data": pedido_info_tuple[1],
+        "total": pedido_info_tuple[2],
+        "cliente_nome": pedido_info_tuple[3]
+    }
 
-            # Usa fetch_all=True
-            return execute_query(query, params, fetch_all=True)
+    # 2. Buscar Itens do Pedido
+    itens_query = """
+                  SELECT produto, quantidade, preco_unit
+                  FROM itens_pedido
+                  WHERE pedido_id = ? \
+                  """
+    itens_list_tuples = db.execute_query(itens_query, (pedido_id,), fetch='all')
 
-        except Exception as e:
-            log.error(f"Erro em find_pedidos: {e}", exc_info=True)
-            raise
+    # Converte a lista de tuplas de itens para lista de dicionários
+    itens_list_dict = []
+    for item_tuple in itens_list_tuples:
+        itens_list_dict.append({
+            "produto": item_tuple[0],
+            "quantidade": item_tuple[1],
+            "preco_unit": item_tuple[2]
+        })
 
-    def get_pedido_details(self, pedido_id):
-        """
-        Busca os detalhes completos de um pedido (info + itens) pelo ID.
-        Retorna um dicionário estruturado.
-        """
-        try:
-            # 1. Busca informações principais do pedido
-            query_pedido = "SELECT id, cliente_id, data, total FROM pedidos WHERE id = ?"
-            pedido_info_tuple = execute_query(query_pedido, (pedido_id,), fetch_one=True)
-
-            if not pedido_info_tuple:
-                return None  # Pedido não encontrado
-
-            pedido_info = {
-                'id': pedido_info_tuple[0],
-                'cliente_id': pedido_info_tuple[1],
-                'data': pedido_info_tuple[2],
-                'total': pedido_info_tuple[3]
-            }
-
-            # 2. Busca os itens do pedido
-            query_itens = "SELECT produto, quantidade, preco_unit FROM itens_pedido WHERE pedido_id = ?"
-            itens_tuple_list = execute_query(query_itens, (pedido_id,), fetch_all=True)
-
-            itens_list = []
-            for item_tuple in itens_tuple_list:
-                itens_list.append({
-                    'produto': item_tuple[0],
-                    'quantidade': item_tuple[1],
-                    'preco_unit': item_tuple[2]
-                })
-
-            # 3. Retorna o dicionário combinado
-            return {'pedido_info': pedido_info, 'itens': itens_list}
-
-        except Exception as e:
-            log.error(f"Erro em get_pedido_details (ID: {pedido_id}): {e}", exc_info=True)
-            raise
-
-    def salvar_pedido_transacional(self, cliente_id, data_pedido, itens, total):
-        """Salva um novo pedido e seus itens usando uma transação."""
-        try:
-            # Inicia a transação (commit=False)
-
-            # 1. Insere o pedido principal
-            query_pedido = "INSERT INTO pedidos (cliente_id, data, total) VALUES (?, ?, ?)"
-            # Pedimos para retornar o ID do pedido inserido
-            pedido_id = execute_query(query_pedido, (cliente_id, data_pedido, total), commit=False,
-                                      fetch_last_row_id=True)
-
-            if not pedido_id:
-                raise Exception("Não foi possível obter o ID do novo pedido.")
-
-            # 2. Insere os itens
-            query_item = "INSERT INTO itens_pedido (pedido_id, produto, quantidade, preco_unit) VALUES (?, ?, ?, ?)"
-            for item in itens:
-                execute_query(query_item, (pedido_id, item['produto'], item['quantidade'], item['preco_unit']),
-                              commit=False)
-
-            # 3. Efetiva a transação
-            execute_query("COMMIT", commit=False)  # O commit=False aqui apenas executa o comando "COMMIT"
-
-            log.info(f"Pedido {pedido_id} salvo com sucesso em transação.")
-
-        except Exception as e:
-            log.error(f"Erro na transação de salvar pedido: {e}", exc_info=True)
-            try:
-                # Tenta reverter a transação em caso de erro
-                execute_query("ROLLBACK", commit=False)
-                log.warning("Transação de salvar pedido revertida (ROLLBACK).")
-            except Exception as re:
-                log.critical(f"Falha ao reverter (ROLLBACK) transação: {re}", exc_info=True)
-            raise  # Levanta a exceção original para o controlador
-
-    def editar_pedido_transacional(self, pedido_id, cliente_id, data_pedido, itens, total):
-        """Atualiza um pedido e seus itens usando uma transação."""
-        try:
-            # 1. Atualiza o pedido principal
-            query_pedido_update = "UPDATE pedidos SET cliente_id = ?, data = ?, total = ? WHERE id = ?"
-            execute_query(query_pedido_update, (cliente_id, data_pedido, total, pedido_id), commit=False)
-
-            # 2. Exclui os itens antigos
-            query_delete_itens = "DELETE FROM itens_pedido WHERE pedido_id = ?"
-            execute_query(query_delete_itens, (pedido_id,), commit=False)
-
-            # 3. Insere os novos itens (ou itens editados)
-            query_insert_item = "INSERT INTO itens_pedido (pedido_id, produto, quantidade, preco_unit) VALUES (?, ?, ?, ?)"
-            for item in itens:
-                execute_query(query_insert_item, (pedido_id, item['produto'], item['quantidade'], item['preco_unit']),
-                              commit=False)
-
-            # 4. Efetiva a transação
-            execute_query("COMMIT", commit=False)
-
-            log.info(f"Pedido {pedido_id} editado com sucesso em transação.")
-
-        except Exception as e:
-            log.error(f"Erro na transação de editar pedido: {e}", exc_info=True)
-            try:
-                execute_query("ROLLBACK", commit=False)
-                log.warning(f"Transação de editar pedido {pedido_id} revertida (ROLLBACK).")
-            except Exception as re:
-                log.critical(f"Falha ao reverter (ROLLBACK) transação de edição: {re}", exc_info=True)
-            raise
-
-    def delete_pedido_transacional(self, pedido_id):
-        """Exclui um pedido e todos os seus itens (transacional)."""
-        try:
-            # 1. Exclui os itens (devido à FK, fazemos isso primeiro)
-            query_delete_itens = "DELETE FROM itens_pedido WHERE pedido_id = ?"
-            execute_query(query_delete_itens, (pedido_id,), commit=False)
-
-            # 2. Exclui o pedido principal
-            query_delete_pedido = "DELETE FROM pedidos WHERE id = ?"
-            execute_query(query_delete_pedido, (pedido_id,), commit=False)
-
-            # 3. Efetiva
-            execute_query("COMMIT", commit=False)
-            log.info(f"Pedido {pedido_id} e seus itens excluídos com sucesso.")
-
-        except Exception as e:
-            log.error(f"Erro na transação de excluir pedido: {e}", exc_info=True)
-            try:
-                execute_query("ROLLBACK", commit=False)
-                log.warning(f"Transação de excluir pedido {pedido_id} revertida (ROLLBACK).")
-            except Exception as re:
-                log.critical(f"Falha ao reverter (ROLLBACK) transação de exclusão: {re}", exc_info=True)
-            raise
-
+    return pedido_info_dict, itens_list_dict

@@ -1,335 +1,351 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-import logging
-import logging.config
-import sys
-
-# Importa o inicializador do DB
+from tkinter import ttk, messagebox, filedialog
 import db
-
-# Importa os Models
-try:
-    from models import ClienteModel, PedidoModel
-except ImportError:
-    logging.critical("Falha ao importar os módulos 'models'. O arquivo 'models.py' existe?")
-    sys.exit(1)
-
-# Importa as Views
-try:
-    from views.clientes_view import ClienteListView, ClienteFormWindow
-    from views.pedidos_view import PedidoListView, PedidoFormWindow
-except ImportError as e:
-    logging.critical(f"Falha ao importar os módulos 'views'. Verifique os arquivos: {e}")
-    sys.exit(1)
+import models
+import utils
+from views.clientes_view import ClientesViewFrame, ClienteForm
+from views.pedidos_view import PedidosViewFrame, PedidoForm
+from typing import Optional, Dict, Any, List
+import sqlite3  # Para capturar 'IntegrityError'
+import export_utils  # Para exportação
 
 
-# Configuração centralizada de Logging
-def setup_logging():
-    """Configura o logging para a aplicação."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[
-            logging.StreamHandler()  # Saída para o console
-            # Você pode adicionar logging.FileHandler('app.log') aqui se quiser
-        ]
-    )
-    # Define o loglevel do DB (que é muito verboso) para WARNING
-    logging.getLogger('db').setLevel(logging.WARNING)
-
-
-log = logging.getLogger(__name__)
-
-
-class MainApplication(tk.Tk):
-    """Classe principal da aplicação."""
-
+class App(tk.Tk):
     def __init__(self):
         super().__init__()
+
+        # --- Configuração da Janela Principal ---
         self.title("Sistema de Clientes e Pedidos")
-        self.geometry("800x600")
+        self.geometry("900x600")  # Tamanho inicial
+        utils.center_window(self)  # Centraliza na tela
 
-        self.cliente_model = None
-        self.pedido_model = None
+        # --- Configuração do Estilo (Tema 'clam') ---
+        # Traz um visual mais moderno e consistente
+        style = ttk.Style(self)
+        style.theme_use('clam')
 
+        # Ajustes finos no estilo (opcional, mas melhora a aparência)
+        style.configure("TNotebook.Tab", padding=[12, 5], font=("-size 10"))
+        style.configure("TButton", padding=5, font=("-size 10"))
+        style.configure("Treeview.Heading", font=("-size 10 -weight bold"))
+
+        # --- Variáveis de Referência (para Views) ---
+        self.clientes_view_frame: Optional[ClientesViewFrame] = None
+        self.pedidos_view_frame: Optional[PedidosViewFrame] = None
+
+        # --- Inicialização dos Widgets ---
+        self.create_widgets()
+
+        # --- Carregamento Inicial de Dados ---
+        self.load_clientes_data()
+        self.load_pedidos_data()  # Carrega os pedidos
+
+    def create_widgets(self):
+        """Cria a estrutura principal (Notebook com abas)."""
+
+        # Frame principal com padding
+        main_frame = ttk.Frame(self, padding="10 10 10 10")
+        main_frame.pack(fill="both", expand=True)
+
+        # --- Notebook (Abas) ---
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill="both", expand=True)
+
+        # --- Aba de Clientes ---
+        # Frame que contém tudo na aba de clientes
+        clientes_tab_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(clientes_tab_frame, text="Clientes")
+
+        # Instancia a View de Clientes (a lista)
+        # Passamos os 'callbacks' (funções) que a view deve chamar
+        self.clientes_view_frame = ClientesViewFrame(
+            master=clientes_tab_frame,
+            on_open_new_callback=self.open_cliente_form,
+            on_open_edit_callback=self.open_cliente_form,  # Reutiliza a mesma função
+            on_delete_callback=self.delete_cliente,
+            on_search_callback=self.load_clientes_data  # 'Buscar' recarrega a lista com o filtro
+        )
+        self.clientes_view_frame.pack(fill="both", expand=True)
+
+        # --- Aba de Pedidos ---
+        pedidos_tab_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(pedidos_tab_frame, text="Pedidos")
+
+        # Botão "Novo Pedido" (fica *acima* da lista de pedidos)
+        # (Design diferente da aba Clientes, onde o botão 'Novo' está junto da busca)
+        novo_pedido_button = ttk.Button(pedidos_tab_frame,
+                                        text="Criar Novo Pedido",
+                                        command=self.open_pedido_form)
+        novo_pedido_button.pack(anchor="ne", pady=(0, 10))  # Alinhado à direita (Nordeste)
+
+        # Instancia a View de Pedidos (a lista)
+        self.pedidos_view_frame = PedidosViewFrame(
+            master=pedidos_tab_frame,
+            on_delete_callback=self.delete_pedido,
+            on_search_callback=self.load_pedidos_data,  # 'Buscar' recarrega com filtros
+            on_clear_filters_callback=self.load_pedidos_data,  # 'Limpar' recarrega tudo
+            on_export_csv_callback=self.export_pedido_csv,
+            on_export_pdf_callback=self.export_pedido_pdf
+        )
+        self.pedidos_view_frame.pack(fill="both", expand=True)
+
+    # =========================================================================
+    # === MÉTODOS CONTROLADORES (LÓGICA) - CLIENTES ===
+    # =========================================================================
+
+    def load_clientes_data(self, search_term: str = ""):
+        """
+        Busca dados no 'models' e atualiza a 'view' de clientes.
+        """
         try:
-            self._instantiate_models()
+            # 1. Busca dados no Model
+            # CORREÇÃO: Chamando o nome correto 'get_clientes_data'
+            clientes_list = models.get_clientes_data(search_term)
+
+            # 2. Atualiza a View (Treeview)
+            if self.clientes_view_frame:
+                self.clientes_view_frame.refresh_data(clientes_list)
+
         except Exception as e:
-            log.critical(f"Falha ao instanciar modelos: {e}", exc_info=True)
-            messagebox.showerror("Erro Crítico", f"Não foi possível iniciar os modelos de dados:\n{e}")
-            self.destroy()
-            return
+            print(f"ERRO [main.load_clientes_data]: {e}")
+            messagebox.showerror("Erro ao Carregar Clientes",
+                                 f"Não foi possível carregar os dados dos clientes:\n{e}",
+                                 parent=self)
 
-        self._setup_ui()
+    def open_cliente_form(self, cliente_data: Optional[Dict[str, Any]] = None):
+        """
+        Abre o popup (Toplevel) ClienteForm para Novo ou Edição.
 
-        # Inicia carregando os dados nas abas
-        self._refresh_cliente_list()
-        self._refresh_pedido_list()
-
-    def _instantiate_models(self):
-        """Instancia os modelos de dados."""
-        self.cliente_model = ClienteModel()
-        self.pedido_model = PedidoModel()
-        log.info("Modelos de dados instanciados.")
-
-    def _setup_ui(self):
-        """Configura a interface principal com abas."""
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(pady=10, padx=10, fill="both", expand=True)
-
-        # Configura as abas
-        self._setup_clientes_tab()
-        self._setup_pedidos_tab()
-
-    def _setup_clientes_tab(self):
-        """Cria e configura a aba de Clientes."""
-        self.cliente_frame = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.cliente_frame, text='Clientes')
-
-        self.cliente_view = ClienteListView(self.cliente_frame)
-        self.cliente_view.pack(fill="both", expand=True)
-
-        # --- Conecta os callbacks (Funções do Controlador) ---
-        self.cliente_view.set_callbacks(
-            on_search=self._refresh_cliente_list,
-            on_add=self._handle_add_cliente,
-            on_edit=self._handle_edit_cliente,
-            on_delete=self._handle_delete_cliente
+        :param cliente_data: Se None, abre em modo 'Novo'.
+                             Se Dict, abre em modo 'Editar'.
+        """
+        ClienteForm(
+            master=self,
+            on_save_callback=self.save_cliente,
+            on_cancel_callback=self.on_form_cancel,
+            cliente=cliente_data  # Passa os dados (ou None)
         )
 
-    def _setup_pedidos_tab(self):
-        """Cria e configura a aba de Pedidos."""
-        self.pedido_frame = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.pedido_frame, text='Pedidos')
-
-        self.pedido_view = PedidoListView(self.pedido_frame)
-        self.pedido_view.pack(fill="both", expand=True)
-
-        # --- Conecta os callbacks (Funções do Controlador) ---
-        self.pedido_view.set_callbacks(
-            on_search=self._refresh_pedido_list,
-            on_refresh=self._refresh_pedido_list,  # Botão de atualizar
-            on_add=self._handle_add_pedido,
-            on_edit=self._handle_edit_pedido,
-            on_delete=self._handle_delete_pedido
-        )
-
-    # --- LÓGICA DE CONTROLADOR: CLIENTES ---
-
-    def _refresh_cliente_list(self, search_term=""):
-        """Busca clientes no modelo e atualiza a view."""
-        log.info(f"MAIN: Buscando clientes com termo: '{search_term}'")
+    def save_cliente(self, cliente_data: Dict[str, Any]):
+        """
+        Recebe os dados do ClienteForm e manda para o 'models' salvar.
+        """
         try:
-            clientes = self.cliente_model.find_clients(search_term)
-            self.cliente_view.refresh_treeview(clientes)
+            # 1. Manda para o Model salvar
+            models.save_cliente(cliente_data)
+
+            # 2. Recarrega os dados (para a lista e comboboxes)
+            self.load_clientes_data()
+
+            # (Se a view de pedidos estiver visível, talvez recarregar os clientes
+            # do combobox dela, mas isso é uma melhoria futura)
+
+            id_str = cliente_data.get('id', 'Novo')
+            print(f"INFO [main]: Cliente ID {id_str} salvo com sucesso.")
+
+        except sqlite3.IntegrityError as e:
+            # Erro específico para 'UNIQUE constraint failed'
+            if "UNIQUE constraint failed: clientes.email" in str(e):
+                print(f"ERRO [main.save_cliente]: Email duplicado.")
+                messagebox.showerror("Erro ao Salvar",
+                                     f"O e-mail '{cliente_data['email']}' já está cadastrado.",
+                                     parent=self)
+            else:
+                print(f"ERRO [main.save_cliente] (Integrity): {e}")
+                messagebox.showerror("Erro de Banco de Dados",
+                                     f"Erro de integridade ao salvar:\n{e}",
+                                     parent=self)
+            raise e  # Re-levanta o erro para o form não fechar
+
         except Exception as e:
-            log.error(f"Erro ao buscar clientes: {e}", exc_info=True)
-            messagebox.showerror("Erro de Busca", f"Ocorreu um erro ao buscar clientes:\n{e}")
+            print(f"ERRO [main.save_cliente]: {e}")
+            messagebox.showerror("Erro ao Salvar",
+                                 f"Ocorreu um erro inesperado ao salvar o cliente:\n{e}",
+                                 parent=self)
+            raise e  # Re-levanta o erro para o form não fechar
 
-    def _handle_add_cliente(self):
-        """Abre o formulário para um novo cliente."""
-        log.info("MAIN: Abrindo formulário de novo cliente.")
-        form = ClienteFormWindow(self, mode='new', on_save=self._save_new_cliente)
-        form.grab_set()  # Torna a janela modal
-
-    def _handle_edit_cliente(self, cliente_id):
-        """Abre o formulário para editar um cliente existente."""
-        log.info(f"MAIN: Abrindo formulário de edição para cliente ID: {cliente_id}")
+    def delete_cliente(self, cliente_id: int):
+        """
+        Recebe o ID da ClientesViewFrame e manda para o 'models' excluir.
+        """
         try:
-            cliente_data = self.cliente_model.get_client_by_id(cliente_id)
-            if not cliente_data:
-                messagebox.showerror("Erro", "Cliente não encontrado. A lista pode estar desatualizada.")
-                self._refresh_cliente_list()
+            # 1. Manda para o Model excluir
+            models.delete_cliente(cliente_id)
+
+            # 2. Recarrega os dados
+            self.load_clientes_data()
+
+            print(f"INFO [main]: Cliente ID {cliente_id} excluído com sucesso.")
+
+        except sqlite3.IntegrityError as e:
+            # Erro específico 'FOREIGN KEY constraint failed'
+            if "FOREIGN KEY constraint failed" in str(e):
+                print(f"ERRO [main.delete_cliente]: Cliente com pedidos.")
+                messagebox.showerror("Erro ao Excluir",
+                                     f"Este cliente não pode ser excluído pois possui pedidos associados.",
+                                     parent=self)
+            else:
+                print(f"ERRO [main.delete_cliente] (Integrity): {e}")
+                messagebox.showerror("Erro de Banco de Dados",
+                                     f"Erro de integridade ao excluir:\n{e}",
+                                     parent=self)
+
+        except Exception as e:
+            print(f"ERRO [main.delete_cliente]: {e}")
+            messagebox.showerror("Erro ao Excluir",
+                                 f"Ocorreu um erro inesperado ao excluir o cliente:\n{e}",
+                                 parent=self)
+
+    def on_form_cancel(self):
+        """Callback genérico para quando um formulário é cancelado."""
+        print("Formulário cancelado.")
+
+    # =========================================================================
+    # === MÉTODOS CONTROLADORES (LÓGICA) - PEDIDOS ===
+    # =========================================================================
+
+    def load_pedidos_data(self, search_term: str = "", date_start: str = "", date_end: str = ""):
+        """
+        Busca dados no 'models' e atualiza a 'view' de pedidos.
+        """
+        try:
+            # 1. Busca dados no Model
+            # CORREÇÃO: Chamando a nova função 'get_filtered_pedidos_data'
+            pedidos_list = models.get_filtered_pedidos_data(search_term, date_start, date_end)
+
+            # 2. Atualiza a View (Treeview)
+            if self.pedidos_view_frame:
+                self.pedidos_view_frame.refresh_data(pedidos_list)
+
+        except Exception as e:
+            print(f"ERRO [main.load_pedidos_data]: {e}")
+            messagebox.showerror("Erro ao Carregar Pedidos",
+                                 f"Não foi possível carregar os dados dos pedidos:\n{e}",
+                                 parent=self)
+
+    def open_pedido_form(self):
+        """
+        Abre o popup (Toplevel) PedidoForm para um Novo Pedido.
+        """
+        try:
+            # 1. Busca os clientes para o Combobox
+            # CORREÇÃO: Chamando 'get_clientes_combobox_data'
+            clientes_list = models.get_clientes_combobox_data()
+
+            if not clientes_list:
+                messagebox.showinfo("Aviso",
+                                    "Não é possível criar um pedido pois não há clientes cadastrados.",
+                                    parent=self)
                 return
 
-            form = ClienteFormWindow(
-                self,
-                mode='edit',
-                on_save=self._save_edited_cliente,
-                cliente_data=cliente_data
+            # 2. Abre o formulário
+            PedidoForm(
+                master=self,
+                on_save_callback=self.save_pedido,
+                on_cancel_callback=self.on_form_cancel,
+                clientes_combobox_data=clientes_list  # Passa a lista
             )
-            form.grab_set()
-        except Exception as e:
-            log.error(f"Erro ao buscar cliente para edição: {e}", exc_info=True)
-            messagebox.showerror("Erro", f"Ocorreu um erro ao buscar dados do cliente:\n{e}")
 
-    def _save_new_cliente(self, data):
-        """Salva o novo cliente no modelo."""
-        log.info("MAIN: Salvando novo cliente.")
+        except Exception as e:
+            print(f"ERRO [main.open_pedido_form]: {e}")
+            messagebox.showerror("Erro ao Abrir Formulário",
+                                 f"Não foi possível carregar os dados para o formulário de pedido:\n{e}",
+                                 parent=self)
+
+    def save_pedido(self, pedido_data: Dict[str, Any], itens_list: List[Dict[str, Any]]):
+        """
+        Recebe os dados do PedidoForm e manda para o 'models' salvar (transação).
+        """
         try:
-            self.cliente_model.add_client(data['nome'], data['email'], data['telefone'])
-            messagebox.showinfo("Sucesso", "Cliente cadastrado com sucesso!")
-            self._refresh_cliente_list()  # Atualiza a lista
-            return True  # Indica sucesso para fechar o formulário
-        except Exception as e:
-            log.error(f"Erro ao salvar novo cliente: {e}", exc_info=True)
-            messagebox.showerror("Erro ao Salvar", f"Ocorreu um erro ao salvar o cliente:\n{e}")
-            return False  # Indica falha
+            # 1. Manda para o Model salvar (transação)
+            models.save_pedido(pedido_data, itens_list)
 
-    def _save_edited_cliente(self, data):
-        """Salva o cliente editado no modelo."""
-        log.info(f"MAIN: Salvando edições do cliente ID: {data['id']}")
+            # 2. Recarrega a lista de pedidos
+            self.load_pedidos_data()
+
+            print(f"INFO [main]: Novo pedido salvo com sucesso.")
+
+        except Exception as e:
+            # Captura qualquer erro da transação (ex: falha ao inserir item)
+            print(f"ERRO [main.save_pedido]: {e}")
+            messagebox.showerror("Erro ao Salvar Pedido",
+                                 f"Ocorreu um erro inesperado ao salvar o pedido:\n{e}",
+                                 parent=self)
+            raise e  # Re-levanta o erro para o form não fechar
+
+    def delete_pedido(self, pedido_id: int):
+        """
+        Recebe o ID da PedidosViewFrame e manda para o 'models' excluir.
+        """
         try:
-            self.cliente_model.update_client(data['id'], data['nome'], data['email'], data['telefone'])
-            messagebox.showinfo("Sucesso", "Cliente atualizado com sucesso!")
-            self._refresh_cliente_list()  # Atualiza a lista
-            return True  # Indica sucesso
-        except Exception as e:
-            log.error(f"Erro ao editar cliente: {e}", exc_info=True)
-            messagebox.showerror("Erro ao Salvar", f"Ocorreu um erro ao atualizar o cliente:\n{e}")
-            return False
+            # 1. Manda para o Model excluir
+            models.delete_pedido(pedido_id)
 
-    def _handle_delete_cliente(self, cliente_id):
-        """Exclui um cliente (após confirmação)."""
-        log.info(f"MAIN: Tentativa de exclusão do cliente ID: {cliente_id}")
+            # 2. Recarrega os dados
+            self.load_pedidos_data()
+
+            print(f"INFO [main]: Pedido ID {pedido_id} excluído com sucesso.")
+
+        except Exception as e:
+            print(f"ERRO [main.delete_pedido]: {e}")
+            messagebox.showerror("Erro ao Excluir Pedido",
+                                 f"Ocorreu um erro inesperado ao excluir o pedido:\n{e}",
+                                 parent=self)
+
+    # =========================================================================
+    # === MÉTODOS CONTROLADORES (LÓGICA) - EXPORTAÇÃO ===
+    # =========================================================================
+
+    def export_pedido_csv(self, pedido_id: int):
+        """Lógica para exportar um único pedido para CSV."""
+        print(f"INFO [main]: Solicitada exportação CSV para Pedido ID {pedido_id}")
         try:
-            # Pede confirmação (o show_confirm está na view)
-            if self.cliente_view.show_confirm("Confirmar Exclusão",
-                                              "Tem certeza que deseja excluir este cliente?\nPedidos associados a ele NÃO serão excluídos."):
+            # 1. Obter os dados detalhados
+            pedido_info, itens_list = models.get_pedido_details(pedido_id)
 
-                result = self.cliente_model.delete_client(cliente_id)
+            # 2. Chamar o utilitário de exportação
+            filepath = export_utils.export_to_csv(pedido_info, itens_list)
 
-                if result.get("success"):
-                    messagebox.showinfo("Sucesso", "Cliente excluído com sucesso.")
-                    self._refresh_cliente_list()
-                    # Se excluiu o cliente, é bom atualizar a lista de pedidos também
-                    self._refresh_pedido_list()
-                else:
-                    messagebox.showwarning("Aviso", result.get("message", "Não foi possível excluir o cliente."))
-
+            if filepath:
+                messagebox.showinfo("Exportação Concluída",
+                                    f"Pedido exportado para CSV com sucesso:\n{filepath}",
+                                    parent=self)
         except Exception as e:
-            log.error(f"Erro ao excluir cliente: {e}", exc_info=True)
-            messagebox.showerror("Erro ao Excluir", f"Ocorreu um erro ao excluir o cliente:\n{e}")
+            print(f"ERRO [main.export_pedido_csv]: {e}")
+            messagebox.showerror("Erro na Exportação",
+                                 f"Ocorreu um erro ao gerar o arquivo CSV:\n{e}",
+                                 parent=self)
 
-    # --- LÓGICA DE CONTROLADOR: PEDIDOS ---
-
-    def _refresh_pedido_list(self, search_term=""):
-        """Busca pedidos no modelo e atualiza a view."""
-        log.info(f"MAIN: Buscando pedidos com termo: '{search_term}'")
+    def export_pedido_pdf(self, pedido_id: int):
+        """Lógica para exportar um único pedido para PDF."""
+        print(f"INFO [main]: Solicitada exportação PDF para Pedido ID {pedido_id}")
         try:
-            pedidos = self.pedido_model.find_pedidos(search_term)
-            self.pedido_view.refresh_treeview(pedidos)
+            # 1. Obter os dados detalhados
+            pedido_info, itens_list = models.get_pedido_details(pedido_id)
+
+            # 2. Chamar o utilitário de exportação
+            filepath = export_utils.export_to_pdf(pedido_info, itens_list)
+
+            if filepath:
+                messagebox.showinfo("Exportação Concluída",
+                                    f"Pedido exportado para PDF com sucesso:\n{filepath}",
+                                    parent=self)
         except Exception as e:
-            log.error(f"Erro ao buscar pedidos: {e}", exc_info=True)
-            messagebox.showerror("Erro de Busca", f"Ocorreu um erro ao buscar pedidos:\n{e}")
-
-    def _get_all_clients_list(self):
-        """Busca lista simples de clientes (id, nome) para o Combobox."""
-        try:
-            return self.cliente_model.get_all_clients_list()
-        except Exception as e:
-            log.error(f"Erro ao buscar lista de clientes para formulário: {e}", exc_info=True)
-            return []
-
-    def _handle_add_pedido(self):
-        """Abre o formulário para um novo pedido."""
-        log.info("MAIN: Abrindo formulário de novo pedido.")
-
-        all_clients = self._get_all_clients_list()
-        if not all_clients:
-            messagebox.showwarning("Aviso", "Não é possível criar um pedido, pois não há clientes cadastrados.")
-            log.warning("MAIN: Tentativa de criar pedido sem clientes cadastrados.")
-            return
-
-        form = PedidoFormWindow(
-            self,
-            mode='new',
-            all_clients_list=all_clients,
-            on_save=self._save_new_pedido
-        )
-        form.grab_set()
-
-    def _handle_edit_pedido(self, pedido_id):
-        """Abre o formulário para editar um pedido existente."""
-        log.info(f"MAIN: Abrindo formulário de edição para pedido ID: {pedido_id}")
-        try:
-            pedido_data = self.pedido_model.get_pedido_details(pedido_id)
-            if not pedido_data:
-                messagebox.showerror("Erro", "Pedido não encontrado. A lista pode estar desatualizada.")
-                self._refresh_pedido_list()
-                return
-
-            all_clients = self._get_all_clients_list()
-
-            form = PedidoFormWindow(
-                self,
-                mode='edit',
-                pedido_data=pedido_data,
-                all_clients_list=all_clients,
-                on_save=self._save_edited_pedido
-            )
-            form.grab_set()
-        except Exception as e:
-            log.error(f"Erro ao buscar pedido para edição: {e}", exc_info=True)
-            messagebox.showerror("Erro", f"Ocorreu um erro ao buscar dados do pedido:\n{e}")
-
-    def _save_new_pedido(self, data):
-        """Salva o novo pedido no modelo."""
-        log.info("MAIN: Salvando novo pedido.")
-        try:
-            self.pedido_model.salvar_pedido_transacional(
-                cliente_id=data['cliente_id'],
-                data_pedido=data['data'],
-                itens=data['itens'],
-                total=data['total']
-            )
-            messagebox.showinfo("Sucesso", "Pedido cadastrado com sucesso!")
-            self._refresh_pedido_list()
-            return True
-        except Exception as e:
-            log.error(f"Erro ao salvar novo pedido: {e}", exc_info=True)
-            messagebox.showerror("Erro ao Salvar", f"Ocorreu um erro ao salvar o pedido:\n{e}")
-            return False
-
-    def _save_edited_pedido(self, data):
-        """Salva o pedido editado no modelo."""
-        log.info(f"MAIN: Salvando edições do pedido ID: {data['id']}")
-        try:
-            self.pedido_model.editar_pedido_transacional(
-                pedido_id=data['id'],
-                cliente_id=data['cliente_id'],
-                data_pedido=data['data'],
-                itens=data['itens'],
-                total=data['total']
-            )
-            messagebox.showinfo("Sucesso", "Pedido atualizado com sucesso!")
-            self._refresh_pedido_list()
-            return True
-        except Exception as e:
-            log.error(f"Erro ao editar pedido: {e}", exc_info=True)
-            messagebox.showerror("Erro ao Salvar", f"Ocorreu um erro ao atualizar o pedido:\n{e}")
-            return False
-
-    def _handle_delete_pedido(self, pedido_id):
-        """Exclui um pedido (após confirmação)."""
-        log.info(f"MAIN: Tentativa de exclusão do pedido ID: {pedido_id}")
-        if self.pedido_view.show_confirm("Confirmar Exclusão",
-                                         "Tem certeza que deseja excluir este pedido?\nEsta ação é irreversível."):
-            try:
-                self.pedido_model.delete_pedido_transacional(pedido_id)
-                messagebox.showinfo("Sucesso", "Pedido excluído com sucesso.")
-                self._refresh_pedido_list()
-            except Exception as e:
-                log.error(f"Erro ao excluir pedido: {e}", exc_info=True)
-                messagebox.showerror("Erro ao Excluir", f"Ocorreu um erro ao excluir o pedido:\n{e}")
+            print(f"ERRO [main.export_pedido_pdf]: {e}")
+            messagebox.showerror("Erro na Exportação",
+                                 f"Ocorreu um erro ao gerar o arquivo PDF:\n{e}",
+                                 parent=self)
 
 
 if __name__ == "__main__":
-    # 1. Configura o logging ANTES de tudo
-    setup_logging()
-
-    # 2. Inicializa o banco de dados
-    log.info("Aplicação iniciada.")
     try:
+        print("Inicializando banco de dados...")
         db.init_db()
-        log.info("Banco de dados inicializado com sucesso.")
     except Exception as e:
-        log.critical(f"Falha ao inicializar o banco de dados: {e}", exc_info=True)
-        messagebox.showerror("Erro Crítico de DB", f"Não foi possível iniciar o banco de dados:\n{e}")
-        sys.exit(1)
+        print(f"ERRO FATAL: Não foi possível inicializar o banco de dados: {e}")
+        messagebox.showerror("Erro Crítico de Banco de Dados",
+                             f"Não foi possível inicializar o banco de dados: {e}\n\nO aplicativo será fechado.")
+        exit(1)  # Sai se o DB não puder ser iniciado
 
-    # 3. Inicia a aplicação
-    app = MainApplication()
+    app = App()
     app.mainloop()
-
