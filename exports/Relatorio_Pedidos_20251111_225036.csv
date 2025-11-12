@@ -1,0 +1,3 @@
+ID Pedido;Data;Cliente;Itens (Qtd);Total (R$)
+2;2025-11-11;Gabriel Tarsis;"Celular (1);  Computador (2)";35000.00
+3;2025-11-11;Guilherme;arroz (1);4.65
