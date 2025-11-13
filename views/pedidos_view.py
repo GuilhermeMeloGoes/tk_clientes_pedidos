@@ -8,10 +8,9 @@ para criar um novo pedido.
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Callable, Optional, Dict, Any, List, Tuple
-import utils  # Importa o utils
-from tkcalendar import DateEntry  # Importa o seletor de data
+import utils # Importa o utils
+from tkcalendar import DateEntry # Importa o seletor de data
 import datetime
-
 
 # =============================================================================
 # === FRAME DA LISTA DE PEDIDOS (COM FILTROS) ===
@@ -25,16 +24,18 @@ class PedidosViewFrame(ttk.Frame):
 
     def __init__(self,
                  master: tk.Widget,
+                 on_new_callback: Callable[[], None], # <-- NOVO
                  on_delete_callback: Callable[[int], None],
                  on_search_callback: Callable[[str, str, str], None],
                  on_clear_filters_callback: Callable[[], None],
                  on_export_csv_callback: Callable[[int], None],
                  on_export_pdf_callback: Callable[[int], None]
-                 ):
+                ):
         """
         Inicializa o frame de Pedidos.
 
         :param master: O widget pai (a aba do Notebook).
+        :param on_new_callback: Callback para o botão 'Novo Pedido'.
         :param on_delete_callback: Callback para o botão 'Excluir'.
         :param on_search_callback: Callback para o botão 'Buscar'.
         :param on_clear_filters_callback: Callback para o botão 'Limpar Filtros'.
@@ -44,6 +45,7 @@ class PedidosViewFrame(ttk.Frame):
         super().__init__(master, padding="0")
 
         # Callbacks
+        self.on_new = on_new_callback # <-- NOVO
         self.on_delete = on_delete_callback
         self.on_search = on_search_callback
         self.on_clear_filters = on_clear_filters_callback
@@ -79,9 +81,9 @@ class PedidosViewFrame(ttk.Frame):
         self.date_start_entry = DateEntry(filter_frame, width=12, background='darkblue',
                                           foreground='white', borderwidth=2,
                                           date_pattern='dd/mm/yyyy',
-                                          locale='pt_BR')  # pt_BR para formato DD/MM/YYYY
+                                          locale='pt_BR') # pt_BR para formato DD/MM/YYYY
         self.date_start_entry.pack(side="left", padx=5)
-        self.date_start_entry.set_date(None)  # Começa vazio
+        self.date_start_entry.set_date(None) # Começa vazio
 
         # Filtro Data Fim
         ttk.Label(filter_frame, text="Data Fim:").pack(side="left", padx=(15, 5))
@@ -90,7 +92,7 @@ class PedidosViewFrame(ttk.Frame):
                                         date_pattern='dd/mm/yyyy',
                                         locale='pt_BR')
         self.date_end_entry.pack(side="left", padx=5)
-        self.date_end_entry.set_date(None)  # Começa vazio
+        self.date_end_entry.set_date(None) # Começa vazio
 
         # --- Sub-frame para Botões (Linha 2) ---
         action_frame = ttk.Frame(top_frame)
@@ -113,6 +115,11 @@ class PedidosViewFrame(ttk.Frame):
         self.export_csv_button = ttk.Button(action_frame, text="Exportar CSV", command=self._on_export_csv_click)
         self.export_csv_button.pack(side="right", padx=5)
 
+        # Botão Novo Pedido (NOVO)
+        self.new_button = ttk.Button(action_frame, text="Novo Pedido", command=self.on_new)
+        self.new_button.pack(side="right", padx=5)
+
+
         # --- Frame da Treeview (Centro) ---
         tree_frame = ttk.Frame(self)
         tree_frame.pack(fill="both", expand=True)
@@ -130,10 +137,10 @@ class PedidosViewFrame(ttk.Frame):
         self.tree.column("data", width=120, anchor="center")
 
         self.tree.heading("cliente", text="Cliente")
-        self.tree.column("cliente", width=400)  # Coluna larga
+        self.tree.column("cliente", width=400) # Coluna larga
 
         self.tree.heading("total", text="Total (R$)")
-        self.tree.column("total", width=120, anchor="e")  # 'e' (east) = alinhado à direita
+        self.tree.column("total", width=120, anchor="e") # 'e' (east) = alinhado à direita
 
         # Scrollbars
         scrollbar_y = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
@@ -151,7 +158,7 @@ class PedidosViewFrame(ttk.Frame):
     def _get_selected_pedido_id(self) -> Optional[int]:
         """Helper para pegar o ID do item selecionado na Treeview."""
         try:
-            selected_item = self.tree.selection()[0]  # Pega o primeiro (e único) item selecionado
+            selected_item = self.tree.selection()[0] # Pega o primeiro (e único) item selecionado
             pedido_id = self.tree.item(selected_item, "values")[0]
             return int(pedido_id)
         except IndexError:
@@ -202,6 +209,7 @@ class PedidosViewFrame(ttk.Frame):
                                f"Tem certeza que deseja excluir o Pedido ID {pedido_id}?\n\n"
                                "Todos os itens deste pedido também serão excluídos.",
                                parent=self, icon="warning"):
+
             # Chama o callback do main.py
             self.on_delete(pedido_id)
 
@@ -222,6 +230,7 @@ class PedidosViewFrame(ttk.Frame):
 
         # Chama o callback do main.py
         self.on_export_pdf(pedido_id)
+
 
     def refresh_data(self, pedidos_list: List[Tuple]):
         """
@@ -266,9 +275,9 @@ class PedidoForm(tk.Toplevel):
                  master: tk.Widget,
                  on_save_callback: Callable[[Dict[str, Any], List[Dict[str, Any]]], None],
                  on_cancel_callback: Callable[[], None],
-                 on_dirty_callback: Callable[[tk.Toplevel], None],  # <-- CORRIGIDO
-                 clientes_combobox_data: List[Tuple]  # Lista de (id, nome)
-                 ):
+                 on_dirty_callback: Callable[[tk.Toplevel], None],
+                 clientes_combobox_data: List[Tuple] # Lista de (id, nome)
+                ):
         """
         Inicializa o formulário.
 
@@ -282,18 +291,18 @@ class PedidoForm(tk.Toplevel):
 
         self.on_save = on_save_callback
         self.on_cancel = on_cancel_callback
-        self.on_dirty = on_dirty_callback  # <-- CORRIGIDO
+        self.on_dirty = on_dirty_callback
 
         self.title("Novo Pedido")
-        self.transient(master)  # Mantém sobre a janela principal
-        self.grab_set()  # Modal
+        self.transient(master) # Mantém sobre a janela principal
+        self.grab_set()        # Modal
 
         # Mapeia os dados do combobox
         self.clientes_map = {nome: id for id, nome in clientes_combobox_data}
         self.clientes_nomes = [nome for id, nome in clientes_combobox_data]
 
         # Estado interno
-        self.is_dirty = False  # Rastreia alterações não salvas
+        self.is_dirty = False # Rastreia alterações não salvas
         self.total_pedido_var = tk.DoubleVar(value=0.0)
 
         # Variáveis de controle para os campos
@@ -341,17 +350,17 @@ class PedidoForm(tk.Toplevel):
         items_frame = ttk.LabelFrame(main_frame, text="Itens do Pedido", padding="10")
         items_frame.pack(fill="both", expand=True, pady=10)
 
-        items_frame.rowconfigure(1, weight=1)  # Linha da Treeview (expande)
-        items_frame.columnconfigure(0, weight=1)  # Coluna da Treeview (expande)
+        items_frame.rowconfigure(1, weight=1) # Linha da Treeview (expande)
+        items_frame.columnconfigure(0, weight=1) # Coluna da Treeview (expande)
 
         # --- Sub-frame para Adicionar Itens (Linha 0) ---
         add_item_frame = ttk.Frame(items_frame)
         add_item_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
 
         # Configuração flexível do grid
-        add_item_frame.columnconfigure(1, weight=2)  # Produto
-        add_item_frame.columnconfigure(3, weight=1)  # Qtd
-        add_item_frame.columnconfigure(5, weight=1)  # Preço
+        add_item_frame.columnconfigure(1, weight=2) # Produto
+        add_item_frame.columnconfigure(3, weight=1) # Qtd
+        add_item_frame.columnconfigure(5, weight=1) # Preço
 
         ttk.Label(add_item_frame, text="Produto:").grid(row=0, column=0, padx=5, sticky="w")
         self.item_produto_var = tk.StringVar()
@@ -400,8 +409,7 @@ class PedidoForm(tk.Toplevel):
         scrollbar.grid(row=0, column=1, sticky="ns")
 
         # Botão Remover Item (Linha 2)
-        self.remove_item_button = ttk.Button(items_frame, text="Remover Item Selecionado",
-                                             command=self._on_remove_item_click)
+        self.remove_item_button = ttk.Button(items_frame, text="Remover Item Selecionado", command=self._on_remove_item_click)
         self.remove_item_button.grid(row=2, column=0, sticky="e", pady=(10, 0))
 
         # --- Frame Inferior (Total e Botões) ---
@@ -430,7 +438,7 @@ class PedidoForm(tk.Toplevel):
         if not self.is_dirty:
             self.is_dirty = True
             # Notifica o main.py (Controlador)
-            self.on_dirty(self)  # <-- CORRIGIDO
+            self.on_dirty(self)
             print("INFO [PedidoForm]: Formulário marcado como 'dirty'.")
 
     def _on_add_item_click(self, event=None):
@@ -452,7 +460,7 @@ class PedidoForm(tk.Toplevel):
         try:
             preco_unit = self.item_preco_var.get()
             if preco_unit <= 0:
-                raise ValueError("Preço deve ser positivo")
+                 raise ValueError("Preço deve ser positivo")
         except (tk.TclError, ValueError):
             messagebox.showwarning("Valor Inválido",
                                    "O 'Preço Unitário' deve ser um número positivo (ex: 10.50).",
@@ -544,11 +552,11 @@ class PedidoForm(tk.Toplevel):
             return None
 
         cliente_id = self.clientes_map.get(cliente_nome)
-        if cliente_id is None:  # Segurança (não deve acontecer)
-            messagebox.showerror("Erro Interno",
-                                 "Erro ao processar o ID do cliente.",
-                                 parent=self)
-            return None
+        if cliente_id is None: # Segurança (não deve acontecer)
+             messagebox.showerror("Erro Interno",
+                                  "Erro ao processar o ID do cliente.",
+                                  parent=self)
+             return None
 
         # 2. Valida Data
         data_str = self.data_var.get().strip()
@@ -589,20 +597,20 @@ class PedidoForm(tk.Toplevel):
                 total_pedido += (quantidade * preco_unit)
 
             except (IndexError, ValueError, TypeError):
-                messagebox.showerror("Erro Interno",
-                                     f"Erro ao processar os itens do pedido (linha: {values}).",
-                                     parent=self)
-                return None
+                 messagebox.showerror("Erro Interno",
+                                      f"Erro ao processar os itens do pedido (linha: {values}).",
+                                      parent=self)
+                 return None
 
         # Confirma se o total calculado bate com o label (segurança)
         self._update_total()
         label_total = float(self.total_pedido_var.get())
         if abs(total_pedido - label_total) > 0.001:
-            messagebox.showerror("Erro de Cálculo",
-                                 "O total calculado (R$ {total_pedido:.2f}) não bate "
-                                 "com o total exibido (R$ {label_total:.2f}).",
-                                 parent=self)
-            return None
+             messagebox.showerror("Erro de Cálculo",
+                                  "O total calculado (R$ {total_pedido:.2f}) não bate "
+                                  "com o total exibido (R$ {label_total:.2f}).",
+                                  parent=self)
+             return None
 
         # 4. Prepara os dados para o 'main.py'
         pedido_data = {
@@ -613,6 +621,7 @@ class PedidoForm(tk.Toplevel):
 
         return (pedido_data, itens_data_list)
 
+
     def _on_save_click(self):
         """Callback do botão 'Salvar'."""
 
@@ -620,7 +629,7 @@ class PedidoForm(tk.Toplevel):
         validated_data = self._validate_form()
 
         if validated_data is None:
-            return  # Validação falhou
+            return # Validação falhou
 
         pedido_data, itens_data_list = validated_data
 
@@ -629,9 +638,9 @@ class PedidoForm(tk.Toplevel):
             self.on_save(pedido_data, itens_data_list)
 
             # 3. Se o 'on_save' (models) não deu erro, fecha
-            self.is_dirty = False  # Marcar como "não sujo" antes de fechar
-            self.destroy()  # Fecha o Toplevel
-            self.on_cancel()  # Notifica o 'main'
+            self.is_dirty = False # Marcar como "não sujo" antes de fechar
+            self.destroy() # Fecha o Toplevel
+            self.on_cancel() # Notifica o 'main'
 
         except Exception as e:
             # Se o 'main.save_pedido' (models) levantar o erro
@@ -648,10 +657,10 @@ class PedidoForm(tk.Toplevel):
         """
         if self.is_dirty:
             if not messagebox.askyesno("Descartar Alterações?",
-                                       "Você tem alterações não salvas. "
-                                       "Deseja fechar e descartar?",
-                                       parent=self, icon="warning"):
-                return  # Não fecha
+                                         "Você tem alterações não salvas. "
+                                         "Deseja fechar e descartar?",
+                                         parent=self, icon="warning"):
+                return # Não fecha
 
         # Se não estiver 'dirty' ou se o usuário confirmou
         self.is_dirty = False

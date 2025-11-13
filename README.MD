@@ -1,94 +1,200 @@
-Sistema de Clientes e Pedidos (Tkinter)
+Projeto: Sistema de Gerenciamento (Tkinter, SQLite, IA)
 
-Este é um sistema de desktop simples para gerenciamento de clientes e pedidos, desenvolvido em Python 3 com a biblioteca nativa Tkinter e um banco de dados SQLite.
+Este é um aplicativo de desktop completo para gerenciamento de clientes e pedidos, desenvolvido em Python 3 com a biblioteca nativa Tkinter e um banco de dados SQLite.
 
-A aplicação segue uma arquitetura separada por responsabilidades (Model-View-Controller), onde:
+A aplicação foi construída seguindo uma arquitetura MVC (Model-View-Controller) clara para garantir a separação de responsabilidades e facilitar a manutenção.
 
-main.py: Atua como o Controlador (Controller), conectando a lógica de negócios e a interface.
+Recursos Principais
 
-models.py: Contém a lógica de negócios e acesso ao banco de dados (Model).
+O sistema é composto por 5 módulos principais (telas) e diversas funcionalidades avançadas:
 
-views/: Contém os componentes de interface do usuário (View).
+Dashboard: Tela inicial que exibe estatísticas vitais (Total de Clientes, Pedidos no Mês, Receita no Mês, Ticket Médio).
 
-db.py: Gerencia a conexão e a criação do schema do banco de dados.
+Clientes: Gerenciamento CRUD (Criar, Ler, Atualizar, Excluir) completo para clientes, com busca em tempo real.
 
-utils.py: Armazena funções de validação reutilizáveis.
+Pedidos: Tela de listagem de pedidos com filtros por nome, e-mail e intervalo de datas.
 
-Recursos
+Relatórios: Geração de relatórios avançados com filtros por cliente e data, exibindo pedidos e seus itens de forma consolidada.
 
-Gerenciamento de Clientes:
+Histórico: Um log de auditoria que registra todas as ações de criação, edição e exclusão no sistema.
 
-Listar, buscar (por nome/email), adicionar, editar e excluir clientes.
+Formulários (Popups): Janelas modais para "Novo Cliente", "Editar Cliente" e "Novo Pedido", com validação de dados e rastreamento de "alterações não salvas" (dirty checking).
 
-Gerenciamento de Pedidos:
+Exportação: Capacidade de exportar pedidos únicos ou listas de relatórios inteiras para CSV e PDF (usando reportlab).
 
-Listar, buscar (por cliente/ID), adicionar, editar e excluir pedidos.
+Análise de IA (Ollama): Uma funcionalidade no Dashboard que envia os dados dos últimos 5 pedidos para uma IA local (Ollama, modelo phi3) e exibe insights (ex: produtos mais vendidos, ticket médio) na interface.
 
-Ao criar/editar um pedido, é possível adicionar/remover itens (produto, qtd, preço).
+UX Avançada:
 
-Cálculo automático do total do pedido.
+Menu principal de navegação (em vez de abas).
 
-Banco de Dados:
+Alternador de Tema (Claro/Escuro) funcional.
 
-Uso de SQLite para persistência local.
+Proteção ao fechar o app se houver formulários com dados não salvos.
 
-Uso de PRAGMA foreign_keys = ON para garantir integridade (um cliente com pedidos não pode ser excluído).
+Tecnologias Utilizadas
 
-Salvamento de pedidos e exclusões de forma transacional (usando COMMIT e ROLLBACK).
+Linguagem: Python 3.x
 
-UX (Experiência do Usuário):
+Interface Gráfica (GUI): Tkinter (com ttk para widgets modernos)
 
-Validação de formulários (campos obrigatórios, formatos de email, números).
+Banco de Dados: SQLite3 (biblioteca nativa do Python)
 
-Mensagens de confirmação para exclusão.
+Widgets de UI Adicionais: tkcalendar (para seleção de datas)
 
-Prevenção de fechamento de janelas com dados não salvos.
+Geração de PDF: reportlab
 
-Como Executar
+Chamadas de API (IA): httpx (para chamadas assíncronas ao Ollama)
 
-Este projeto utiliza apenas bibliotecas padrão do Python (stdlib), como tkinter e sqlite3.
+Servidor de IA (Local): Ollama (para a funcionalidade de "Analisar Pedidos")
 
-Pré-requisitos
+Outros (Nativos): threading (para chamadas de IA), logging, pathlib, webbrowser, csv, asyncio.
 
-Python 3.x (Tkinter já está incluído na instalação padrão do Python no Windows).
+Como Executar o Programa
 
-Instalação
+Siga estes passos para rodar o aplicativo em sua máquina.
 
-Nenhuma instalação de dependências externas (pip) é necessária.
+1. Pré-requisitos
 
-Execução
+Python 3.10 ou mais recente.
 
-Clone ou baixe os arquivos do projeto para um diretório em seu computador.
+(Opcional) Ollama instalado e rodando para a funcionalidade de IA.
 
-O banco de dados (database.db) será criado automaticamente no mesmo diretório na primeira vez que a aplicação for executada.
+2. Instalação
 
-Para iniciar o programa, execute o arquivo main.py:
+Clone ou Baixe o Projeto:
+Obtenha todos os arquivos (.py, README.md, requirements.txt) e coloque-os em uma pasta.
 
-# No Windows
+Crie um Ambiente Virtual (Recomendado):
+
+python -m venv .venv
+
+
+Ative o Ambiente Virtual:
+
+No Windows (PowerShell): .\.venv\Scripts\Activate.ps1
+
+No Windows (CMD): .\.venv\Scripts\activate.bat
+
+No macOS/Linux: source .venv/bin/activate
+
+Instale as Dependências:
+O projeto usa algumas bibliotecas externas. Instale-as usando o requirements.txt:
+
+pip install -r requirements.txt
+
+
+3. (Opcional) Configurando a Análise de IA
+
+A funcionalidade de "Analisar Pedidos" requer que o Ollama esteja rodando localmente.
+
+Instale o Ollama: Baixe e instale em ollama.com.
+
+Execute o Ollama: Inicie o aplicativo Ollama (ele ficará rodando em segundo plano).
+
+Baixe o Modelo (phi3): Abra seu terminal e execute:
+
+ollama pull phi3
+
+
+(Se você preferir usar outro modelo, como o llama3, altere o nome do modelo no arquivo utils.py na linha 309).
+
+4. Execute o Aplicativo
+
+Com o ambiente ativado e as dependências instaladas, execute o main.py:
+
 python main.py
 
-# No macOS / Linux
-python3 main.py
 
+O banco de dados (app_database.db) e a pasta de logs (logs/) serão criados automaticamente na primeira execução.
 
-Registro de IA
+Como Cada Coisa Funciona (Arquitetura)
 
-Esta seção documenta os principais prompts de interação utilizados com a IA (Gemini) durante o desenvolvimento deste projeto:
+O projeto é dividido em módulos, cada um com uma responsabilidade clara:
 
-Schema e DB Inicial: "Crie, para um app Tkinter, o esquema de SQLite com tabelas clientes, pedidos e itens_pedido. Gere funções Python em db.py para inicializar o banco e executar comandos parametrizados com tratamento de erros."
+main.py (O Controlador)
+Este é o cérebro do aplicativo. Ele não contém nenhuma tela (View) ou lógica de SQL (Model). Sua única função é atuar como o "controlador" (Controller):
 
-Formulário de Cliente: "Gere um formulário Tkinter (janela Toplevel) para cadastrar/editar Clientes com campos nome, e-mail e telefone. Valide: nome obrigatório, e-mail em formato simples, telefone com 8–15 dígitos. Inclua botões Salvar/Cancelar e callbacks separados."
+Inicializa a janela principal (App) e o Menu.
 
-Lista de Clientes: "Crie um frame Tkinter com Treeview para listar clientes, com barra de busca por nome/email e botões Novo/Editar/Excluir. Ao excluir, peça confirmação. Recarregue a lista após operações."
+Gerencia qual tela (Frame) está visível (show_frame).
 
-Formulário de Pedido (Transacional): "Implemente uma janela Tkinter para criar Pedido: selecione Cliente (Combobox), campo Data, tabela de itens (produto/quantidade/preço), botões Adicionar/Remover item e cálculo automático do total. Salve em pedidos e itens_pedido de forma transacional."
+Conecta os botões das Views (ex: on_new_callback) com as funções de lógica (models.py).
 
-Melhorias de UX: "Melhore UX do app: mensagens amigáveis (messagebox), validações com feedback, prevenção de fechar janela com dados não salvos, e try/except com logs simples."
+Gerencia o estado global (tema claro/escuro, is_form_dirty).
 
-Refatoração (Utils): "me traga o arquivo utils com base nesse projetos que fizemos" e "refatore minhas duas classes view uma vez que ja trouxemos diversas funções para o arquivo utils".
+Inicia threads para tarefas demoradas (como a Análise de IA) para não travar a UI.
 
-Criação do Controlador Principal: "agora me traga o código que vai no arquivo main".
+db.py (Acesso ao Banco)
+Este é o módulo de nível mais baixo. Ele não sabe o que é um "cliente" ou "pedido". Ele apenas sabe como executar SQL.
 
-Refatoração da View de Pedidos: "eu preciso que vc me traga o pedido_view como se fosse uma tela igual ao do cliente_view, permitindo apenas cadastrar um pedido caso exista cliente no banco de dados".
+init_db(): Cria o schema do banco de dados (.db) se ele não existir.
 
-Ciclos de Depuração: O desenvolvimento incluiu vários ciclos de depuração iterativa baseados em logs de erro (Traceback) fornecidos pelo usuário. Isso permitiu corrigir TypeError (validações, argumentos de __init__), AttributeError (nomes de métodos em models.py) e sqlite3.OperationalError (lógica de transação e fetch_last_row_id em db.py), alinhando a comunicação entre todos os arquivos do projeto.
+get_db_connection(): Fornece uma conexão para o models.py (usado para transações).
+
+execute_query(): A função principal. Executa qualquer string SQL com parâmetros, gerenciando a conexão, o cursor e o commit/rollback.
+
+models.py (Lógica de Dados)
+Este é o "Modelo" (Model). É o único arquivo que tem permissão para importar e usar o db.py.
+
+Define as funções que o main.py chama (ex: get_clientes_data, save_pedido).
+
+É responsável por escrever as consultas SQL.
+
+Converte os dados brutos do banco (tuplas) em formatos úteis (dicionários, listas) quando necessário (ex: get_pedido_details).
+
+Gerencia a lógica de transações (ex: save_pedido usa conn.commit() e conn.rollback()).
+
+views/ (As Telas)
+Esta pasta contém os arquivos da "Camada Visual" (View).
+
+"Burros": Esses arquivos são intencionalmente "burros". Eles não sabem como salvar no banco de dados ou como a IA funciona.
+
+Definição da UI: Eles definem os botões, labels, e Treeviews (create_widgets).
+
+Callbacks: Eles recebem funções (callbacks) do main.py em seus construtores (__init__). Quando um botão é clicado (ex: _on_save_click), ele apenas chama o callback (ex: self.on_save(dados)).
+
+ClienteForm / PedidoForm: São classes Toplevel (popups) que gerenciam seu próprio estado (validação, is_dirty).
+
+utils.py (Caixa de Ferramentas)
+Contém lógica auxiliar complexa ou genérica.
+
+center_window(): Centraliza popups.
+
+setup_light_theme() / setup_dark_theme(): Contém toda a lógica de ttk.Style para a troca de temas.
+
+analisar_pedidos_ia(): Contém a lógica de negócios da IA. Ele busca os dados (usando o models), formata o prompt e chama a API (usando httpx e asyncio).
+
+app_logger.py (O Auditor)
+Gerencia o logs/app.log.
+
+log_action(): Usado pelo main.py para registrar eventos (ex: "Cliente criado").
+
+read_log() / clear_log(): Usado pela tela de "Histórico".
+
+export_utils.py (O Exportador)
+Contém a lógica de geração de arquivos.
+
+export_to_csv() / export_to_pdf(): Usam csv e reportlab para criar os arquivos.
+
+open_file_externally(): Usa webbrowser para abrir o arquivo gerado no programa padrão do SO.
+
+Prompts Principais Usados no Desenvolvimento
+
+Este projeto foi construído iterativamente com a ajuda de uma IA. Abaixo estão alguns dos prompts-chave que definiram a arquitetura:
+
+Refatoração Inicial (MVC):
+
+"Com base na arquitetura [imagem da arquitetura], refatore o código para que use uma classe utils e models no projeto e ele seja startado pelo main."
+
+Relatórios (SQL Agregado):
+
+"Implemente uma janela ‘Relatórios’ com filtros [...]. Liste os pedidos filtrados em uma Treeview mostrando cliente, data, itens e total." (Isso exigiu a criação da consulta GROUP_CONCAT no models.py).
+
+Refatoração da UI (Menu Bar e Temas):
+
+"Implemente menu principal (Menu bar) [...]. Bloqueie fechamento se houver alterações não salvas [...], e permita alternar tema claro/escuro via ttk.Style()." (Isso exigiu a refatoração de Abas para Frames).
+
+Análise de IA (Async e Threading):
+
+"Adicione botão ‘Analisar Pedidos’ que lê os 5 últimos pedidos do banco, gera um resumo textual e envia via API para [...] Ollama local. Mostre o resultado em Text widget. Mantenha a função em utils.py."

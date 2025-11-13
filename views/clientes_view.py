@@ -232,7 +232,8 @@ class ClienteForm(tk.Toplevel):
         self.on_dirty = on_dirty_callback  # <-- CORRIGIDO
 
         self.is_edit_mode = cliente_data is not None
-        self.cliente_id = cliente_data.get('id') if self.is_edit_mode else None
+        # CORREÇÃO: Verifica se cliente_data não é None antes de .get()
+        self.cliente_id = cliente_data.get('id') if self.is_edit_mode and cliente_data else None
 
         # --- Configuração da Janela ---
         self.title("Editar Cliente" if self.is_edit_mode else "Novo Cliente")
@@ -244,9 +245,18 @@ class ClienteForm(tk.Toplevel):
         self.is_dirty = False  # Rastreia alterações não salvas
 
         # --- Variáveis de Controle (StringVars) ---
-        self.nome_var = tk.StringVar(value=cliente_data.get('nome', ''))
-        self.email_var = tk.StringVar(value=cliente_data.get('email', ''))
-        self.telefone_var = tk.StringVar(value=cliente_data.get('telefone', ''))
+        # CORREÇÃO: Verifica se cliente_data é None (Modo Novo)
+        if self.is_edit_mode and cliente_data:
+            nome_val = cliente_data.get('nome', '')
+            email_val = cliente_data.get('email', '')
+            telefone_val = cliente_data.get('telefone', '')
+        else:
+            # Modo "Novo", todos os campos começam vazios
+            nome_val, email_val, telefone_val = '', '', ''
+
+        self.nome_var = tk.StringVar(value=nome_val)
+        self.email_var = tk.StringVar(value=email_val)
+        self.telefone_var = tk.StringVar(value=telefone_val)
 
         # Registra o callback para quando o usuário digitar
         self.nome_var.trace_add("write", self._set_dirty)
@@ -384,7 +394,7 @@ class ClienteForm(tk.Toplevel):
             self.on_cancel()  # Notifica o 'main'
 
         except Exception as e:
-            # Se o 'main.save_cliente' (models) levantar o erro 
+            # Se o 'main.save_cliente' (models) levantar o erro
             # (ex: email duplicado), o 'except' dele lá no 'main'
             # vai mostrar a messagebox.
             # O 'raise e' dele vai fazer este 'except' ser ativado,
