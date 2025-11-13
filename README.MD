@@ -1,8 +1,6 @@
-Projeto: Sistema de Gerenciamento (Tkinter, SQLite, IA)
+Projeto Tkinter - Sistema de Gerenciamento (Tkinter, SQLite, IA)
 
 Este é um aplicativo de desktop completo para gerenciamento de clientes e pedidos, desenvolvido em Python 3 com a biblioteca nativa Tkinter e um banco de dados SQLite.
-
-A aplicação foi construída seguindo uma arquitetura MVC (Model-View-Controller) clara para garantir a separação de responsabilidades e facilitar a manutenção.
 
 Recursos Principais
 
@@ -32,38 +30,52 @@ Alternador de Tema (Claro/Escuro) funcional.
 
 Proteção ao fechar o app se houver formulários com dados não salvos.
 
-Tecnologias Utilizadas
+Como Instalar e Executar (Para Usuários Finais)
 
-Linguagem: Python 3.x
+Esta seção é para usuários que receberam o arquivo executável (.exe) e não são desenvolvedores (ou seja, não possuem Python instalado).
 
-Interface Gráfica (GUI): Tkinter (com ttk para widgets modernos)
+Opção 1: Se você recebeu um arquivo .zip (Recomendado)
 
-Banco de Dados: SQLite3 (biblioteca nativa do Python)
+Esta é a versão "pasta" (criada com pyinstaller --onedir).
 
-Widgets de UI Adicionais: tkcalendar (para seleção de datas)
+Descompacte o Arquivo: Clique com o botão direito no arquivo .zip (ex: SistemaDeGestao.zip) e selecione "Extrair Tudo..." (ou "Unzip").
 
-Geração de PDF: reportlab
+Abra a Pasta: Entre na pasta que foi criada (ex: SistemaDeGestao).
 
-Chamadas de API (IA): httpx (para chamadas assíncronas ao Ollama)
+Execute o Programa: Dê um clique duplo no arquivo .exe (ex: SistemaDeGestao.exe) para iniciar o aplicativo.
 
-Servidor de IA (Local): Ollama (para a funcionalidade de "Analisar Pedidos")
+Nota: Não mova o .exe para fora desta pasta. Ele precisa dos outros arquivos que vieram juntos no .zip para funcionar.
 
-Outros (Nativos): threading (para chamadas de IA), logging, pathlib, webbrowser, csv, asyncio.
+Opção 2: Se você recebeu um único arquivo .exe
 
-Como Executar o Programa
+Esta é a versão "arquivo único" (criada com pyinstaller --onefile).
 
-Siga estes passos para rodar o aplicativo em sua máquina.
+Execute o Programa: Apenas dê um clique duplo no arquivo .exe (ex: SistemaDeGestao.exe) para iniciar.
 
-1. Pré-requisitos
+Nota: O primeiro início pode ser um pouco mais lento, pois o programa precisa se descompactar temporariamente.
+
+Aviso Importante: Análise de IA (Ollama)
+
+A funcionalidade "Analisar Pedidos (IA)" não funcionará para o usuário final, a menos que ele (separadamente) instale e configure o Ollama em sua própria máquina.
+
+O aplicativo mostrará um erro de conexão se o Ollama não estiver rodando localmente em http://localhost:11434.
+
+Todas as outras funcionalidades (Clientes, Pedidos, Relatórios, PDF, etc.) funcionarão perfeitamente sem o Ollama.
+
+Como Executar (para Desenvolvedores)
+
+Esta seção é para desenvolvedores que desejam executar o código-fonte Python (.py).
+
+1. Pré-requisitos (Dev)
 
 Python 3.10 ou mais recente.
 
 (Opcional) Ollama instalado e rodando para a funcionalidade de IA.
 
-2. Instalação
+2. Instalação (Dev)
 
 Clone ou Baixe o Projeto:
-Obtenha todos os arquivos (.py, README.md, requirements.txt) e coloque-os em uma pasta.
+Obtenha todos os arquivos (.py, README.MD, requirements.txt) e coloque-os em uma pasta.
 
 Crie um Ambiente Virtual (Recomendado):
 
@@ -84,9 +96,7 @@ O projeto usa algumas bibliotecas externas. Instale-as usando o requirements.txt
 pip install -r requirements.txt
 
 
-3. (Opcional) Configurando a Análise de IA
-
-A funcionalidade de "Analisar Pedidos" requer que o Ollama esteja rodando localmente.
+3. (Opcional) Configurando a Análise de IA (Dev)
 
 Instale o Ollama: Baixe e instale em ollama.com.
 
@@ -97,9 +107,7 @@ Baixe o Modelo (phi3): Abra seu terminal e execute:
 ollama pull phi3
 
 
-(Se você preferir usar outro modelo, como o llama3, altere o nome do modelo no arquivo utils.py na linha 309).
-
-4. Execute o Aplicativo
+4. Execute o Aplicativo (Dev)
 
 Com o ambiente ativado e as dependências instaladas, execute o main.py:
 
@@ -108,7 +116,23 @@ python main.py
 
 O banco de dados (app_database.db) e a pasta de logs (logs/) serão criados automaticamente na primeira execução.
 
-Como Cada Coisa Funciona (Arquitetura)
+Como Gerar o Executável (PyInstaller)
+
+Instale o PyInstaller no seu ambiente virtual: pip install pyinstaller
+
+Use o comando (--onedir é recomendado para depuração):
+
+pyinstaller --name "SistemaDeGestao" --windowed --onedir --hidden-import="tkcalendar" --hidden-import="babel.numbers" --hidden-import="reportlab" main.py
+
+
+Ou, para um único arquivo (.exe):
+
+pyinstaller --name "SistemaDeGestao" --windowed --onefile --hidden-import="tkcalendar" --hidden-import="babel.numbers" --hidden-import="reportlab" main.py
+
+
+O resultado estará na pasta dist/.
+
+Arquitetura e Lógica
 
 O projeto é dividido em módulos, cada um com uma responsabilidade clara:
 
@@ -179,22 +203,19 @@ export_to_csv() / export_to_pdf(): Usam csv e reportlab para criar os arquivos.
 
 open_file_externally(): Usa webbrowser para abrir o arquivo gerado no programa padrão do SO.
 
-Prompts Principais Usados no Desenvolvimento
+Prompt da IA (Análise de Pedidos)
 
-Este projeto foi construído iterativamente com a ajuda de uma IA. Abaixo estão alguns dos prompts-chave que definiram a arquitetura:
+Abaixo está o prompt usado para enviar os dados dos últimos pedidos para a IA (Ollama) para análise:
 
-Refatoração Inicial (MVC):
+Com base nos dados dos últimos 5 pedidos fornecidos abaixo, atue como um assistente de negócios e forneça um breve resumo (em 3 ou 4 pontos) sobre os insights mais importantes.
 
-"Com base na arquitetura [imagem da arquitetura], refatore o código para que use uma classe utils e models no projeto e ele seja startado pelo main."
+Concentre-se em:
+- Quais produtos parecem ser os mais populares?
+- Qual é o ticket médio (valor médio por pedido) desses pedidos?
+- Há algum padrão óbvio (ex: clientes recorrentes, itens comprados juntos)?
 
-Relatórios (SQL Agregado):
+Seja breve e direto ao ponto.
 
-"Implemente uma janela ‘Relatórios’ com filtros [...]. Liste os pedidos filtrados em uma Treeview mostrando cliente, data, itens e total." (Isso exigiu a criação da consulta GROUP_CONCAT no models.py).
+--- DADOS DOS PEDIDOS ---
 
-Refatoração da UI (Menu Bar e Temas):
-
-"Implemente menu principal (Menu bar) [...]. Bloqueie fechamento se houver alterações não salvas [...], e permita alternar tema claro/escuro via ttk.Style()." (Isso exigiu a refatoração de Abas para Frames).
-
-Análise de IA (Async e Threading):
-
-"Adicione botão ‘Analisar Pedidos’ que lê os 5 últimos pedidos do banco, gera um resumo textual e envia via API para [...] Ollama local. Mostre o resultado em Text widget. Mantenha a função em utils.py."
+{dados_formatados_aqui}
